@@ -721,9 +721,11 @@ function App() {
                     </div>
                   </div>
                 </div>
-              )}
+              )
+            })()
+          )}
 
-              {/* Tab: DEPENDENCIES */}
+            {/* Tab: DEPENDENCIES */}
               {activeTab === 'dependencies' && (
                 <div className="space-y-6">
                   {selectedRepo.dependencies_profile ? (
