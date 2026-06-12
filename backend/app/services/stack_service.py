@@ -1,10 +1,20 @@
 import os
 import json
+import asyncio
 import logging
 from uuid import UUID
 from typing import Dict, Any, Set, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.repo_repo import repository_repo
+
+# Use stdlib tomllib (Python 3.11+) or fall back to tomli package
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +111,10 @@ class StackService:
 
         # 5. docker-compose.yml scanner (Databases)
         dc_path = os.path.join(local_path, "docker-compose.yml")
+        if not os.path.exists(dc_path):
+            dc_path = os.path.join(local_path, "docker-compose.yaml")
         if os.path.exists(dc_path):
-            scanned_files.append("docker-compose.yml")
+            scanned_files.append(os.path.basename(dc_path))
             try:
                 with open(dc_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read().lower()
@@ -115,38 +127,84 @@ class StackService:
                     if "image: redis" in content or "redis:" in content:
                         databases.add("Redis")
             except Exception as e:
-                logger.error(f"Error scanning docker-compose.yml in {local_path}: {e}")
+                logger.error(f"Error scanning docker-compose in {local_path}: {e}")
 
-        # 6. Source File Extension Scanner and .env connections
-        py_files = 0
-        java_files = 0
-        js_ts_files = 0
-        env_content = ""
+        # 6. pyproject.toml scanner (modern Python: Poetry, PEP 621, Hatch, PDM, uv)
+        pyproject_path = os.path.join(local_path, "pyproject.toml")
+        if os.path.exists(pyproject_path):
+            scanned_files.append("pyproject.toml")
+            backend.add("Python")
+            if tomllib is not None:
+                try:
+                    with open(pyproject_path, "rb") as f:
+                        pyproject_data = tomllib.load(f)
+                    tool = pyproject_data.get("tool", {})
+                    # Detect framework from pyproject.toml tool sections
+                    if "poetry" in tool:
+                        # Check poetry dependencies for frameworks
+                        poetry_deps = {
+                            k.lower(): v
+                            for k, v in tool["poetry"].get("dependencies", {}).items()
+                        }
+                        if "fastapi" in poetry_deps:
+                            backend.add("FastAPI")
+                        if "django" in poetry_deps:
+                            backend.add("Django")
+                        if "flask" in poetry_deps:
+                            backend.add("Flask")
+                    # PEP 621 style dependencies
+                    project_deps = [
+                        d.lower()
+                        for d in pyproject_data.get("project", {}).get("dependencies", [])
+                        if isinstance(d, str)
+                    ]
+                    for dep in project_deps:
+                        if dep.startswith("fastapi"):
+                            backend.add("FastAPI")
+                        elif dep.startswith("django"):
+                            backend.add("Django")
+                        elif dep.startswith("flask"):
+                            backend.add("Flask")
+                except Exception as e:
+                    logger.error(f"Error scanning pyproject.toml in {local_path}: {e}")
 
-        try:
-            for root, dirs, files in os.walk(local_path):
-                # Prune standard directories to keep scan fast
-                dirs[:] = [
-                    d for d in dirs 
-                    if not d.startswith('.') 
-                    and d not in ('venv', 'node_modules', '__pycache__', 'dist', 'target', 'build')
-                ]
-                
-                for file in files:
-                    if file.endswith(".py"):
-                        py_files += 1
-                    elif file.endswith(".java"):
-                        java_files += 1
-                    elif file.endswith((".js", ".jsx", ".ts", ".tsx")):
-                        js_ts_files += 1
-                    elif file == ".env":
-                        try:
-                            with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as ef:
-                                env_content += ef.read().lower()
-                        except Exception:
-                            pass
-        except Exception as e:
-            logger.error(f"Error walking files in {local_path}: {e}")
+        # 7. Pipfile scanner (Pipenv)
+        pipfile_path = os.path.join(local_path, "Pipfile")
+        if os.path.exists(pipfile_path):
+            scanned_files.append("Pipfile")
+            backend.add("Python")
+
+        # Wrap the blocking os.walk in asyncio.to_thread to avoid blocking the event loop
+        def _scan_files_sync():
+            _py_files = 0
+            _java_files = 0
+            _js_ts_files = 0
+            _env_content = ""
+            try:
+                for root, dirs, files in os.walk(local_path):
+                    dirs[:] = [
+                        d for d in dirs
+                        if not d.startswith('.')
+                        and d not in ('venv', 'node_modules', '__pycache__', 'dist', 'target', 'build')
+                    ]
+                    for file in files:
+                        if file.endswith(".py"):
+                            _py_files += 1
+                        elif file.endswith(".java"):
+                            _java_files += 1
+                        elif file.endswith((".js", ".jsx", ".ts", ".tsx")):
+                            _js_ts_files += 1
+                        elif file == ".env":
+                            try:
+                                with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as ef:
+                                    _env_content += ef.read().lower()
+                            except Exception:
+                                pass
+            except Exception as e:
+                logger.error(f"Error walking files in {local_path}: {e}")
+            return _py_files, _java_files, _js_ts_files, _env_content
+
+        py_files, java_files, js_ts_files, env_content = await asyncio.to_thread(_scan_files_sync)
 
         # Register file types found
         if py_files > 0:
@@ -187,24 +245,30 @@ class StackService:
     @classmethod
     async def _scan_python_imports(cls, local_path: str, backend: Set[str]) -> None:
         """Heuristic scan of python source files to check for frame-specific imports"""
-        try:
-            scanned_count = 0
-            for root, dirs, files in os.walk(local_path):
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('venv', 'node_modules', '__pycache__')]
-                for file in files:
-                    if file.endswith(".py"):
-                        scanned_count += 1
-                        if scanned_count > 30:  # Bound scanning time
-                            return
-                        with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as f:
-                            code = f.read()
-                            if "from fastapi" in code or "import fastapi" in code:
-                                backend.add("FastAPI")
-                            if "from flask" in code or "import flask" in code:
-                                backend.add("Flask")
-                            if "from django" in code or "import django" in code:
-                                backend.add("Django")
-        except Exception as e:
-            logger.warning(f"Error scanning python imports in {local_path}: {e}")
+        def _scan():
+            found = set()
+            try:
+                scanned_count = 0
+                for root, dirs, files in os.walk(local_path):
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('venv', 'node_modules', '__pycache__')]
+                    for file in files:
+                        if file.endswith(".py"):
+                            scanned_count += 1
+                            if scanned_count > 30:  # Bound scanning time
+                                return found
+                            with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as f:
+                                code = f.read()
+                                if "from fastapi" in code or "import fastapi" in code:
+                                    found.add("FastAPI")
+                                if "from flask" in code or "import flask" in code:
+                                    found.add("Flask")
+                                if "from django" in code or "import django" in code:
+                                    found.add("Django")
+            except Exception as e:
+                logger.warning(f"Error scanning python imports in {local_path}: {e}")
+            return found
+
+        found_frameworks = await asyncio.to_thread(_scan)
+        backend.update(found_frameworks)
 
 stack_service = StackService()

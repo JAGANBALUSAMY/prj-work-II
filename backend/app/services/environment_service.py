@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import logging
 from uuid import UUID
 from typing import Dict, Any, List, Set
@@ -47,10 +48,8 @@ class EnvironmentService:
                     with open(t_path, "r", encoding="utf-8", errors="ignore") as f:
                         for line in f:
                             line = line.strip()
-                            # Skip comments or empty lines
                             if not line or line.startswith("#"):
                                 continue
-                            # Match variable assignment: KEY=VALUE or KEY=
                             match = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*=", line)
                             if match:
                                 key = match.group(1)
@@ -59,46 +58,64 @@ class EnvironmentService:
                 except Exception as e:
                     logger.error(f"Error reading env template {t_file} in {local_path}: {e}")
 
-        # 2. Scan source code files
-        # Regex specs:
-        # Python: os.getenv("VAR") or os.environ.get("VAR") or os.environ["VAR"]
+        # 2. Scan docker-compose.yml / docker-compose.yaml for environment keys
+        dc_names = ["docker-compose.yml", "docker-compose.yaml"]
+        for dc_name in dc_names:
+            dc_path = os.path.join(local_path, dc_name)
+            if os.path.exists(dc_path):
+                template_files_found.append(dc_name)
+                scanned_files_count += 1
+                try:
+                    with open(dc_path, "r", encoding="utf-8", errors="ignore") as f:
+                        dc_content = f.read()
+                    # Match both `KEY=VALUE` and bare `KEY:` under environment: sections
+                    # Pattern 1: bare variable (just key name in list) e.g. `- DATABASE_URL`
+                    for key in re.findall(r"^\s*-\s+([A-Z_][A-Z0-9_]{2,})\s*$", dc_content, re.MULTILINE):
+                        template_vars.add(key)
+                        var_sources.setdefault(key, set()).add(dc_name)
+                    # Pattern 2: key=value style `- DATABASE_URL=postgres://...`
+                    for key in re.findall(r"^\s*-\s+([A-Z_][A-Z0-9_]{2,})\s*=", dc_content, re.MULTILINE):
+                        template_vars.add(key)
+                        var_sources.setdefault(key, set()).add(dc_name)
+                    # Pattern 3: map style `DATABASE_URL: postgres://...`
+                    for key in re.findall(r"^\s{4,}([A-Z_][A-Z0-9_]{2,}):\s", dc_content, re.MULTILINE):
+                        template_vars.add(key)
+                        var_sources.setdefault(key, set()).add(dc_name)
+                except Exception as e:
+                    logger.error(f"Error scanning {dc_name} for env vars in {local_path}: {e}")
+                break  # only scan one docker-compose file
+
+        # 3. Scan source code files using asyncio.to_thread for non-blocking I/O
+        # Regex patterns for env var detection
         py_getenv = re.compile(r"""\bos\.getenv\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
         py_envget = re.compile(r"""\bos\.environ\.get\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
         py_envidx = re.compile(r"""\bos\.environ\[\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
-
-        # Node: process.env.VAR or process.env["VAR"]
         node_envdot = re.compile(r"""\bprocess\.env\.([a-zA-Z_][a-zA-Z0-9_]*)\b""")
         node_envidx = re.compile(r"""\bprocess\.env\[\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
-
-        # Java: System.getenv("VAR")
         java_getenv = re.compile(r"""\bSystem\.getenv\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
 
-        try:
-            for root, dirs, files in os.walk(local_path):
-                # Prune common ignore dirs
-                dirs[:] = [
-                    d for d in dirs 
-                    if not d.startswith('.') 
-                    and d not in ('venv', 'node_modules', '__pycache__', 'dist', 'target', 'build', 'gradle')
-                ]
-                
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(file_path, local_path)
-                    
-                    # Check file type
-                    is_py = file.endswith(".py")
-                    is_js = file.endswith((".js", ".jsx", ".ts", ".tsx"))
-                    is_java = file.endswith(".java")
-
-                    if not (is_py or is_js or is_java):
-                        continue
-
-                    scanned_files_count += 1
-                    try:
-                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                            content = f.read()
-                            
+        def _scan_source_files_sync():
+            _scanned_count = 0
+            _found_vars: Dict[str, Set[str]] = {}
+            try:
+                for root, dirs, files in os.walk(local_path):
+                    dirs[:] = [
+                        d for d in dirs
+                        if not d.startswith('.')
+                        and d not in ('venv', 'node_modules', '__pycache__', 'dist', 'target', 'build', 'gradle')
+                    ]
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(file_path, local_path)
+                        is_py = file.endswith(".py")
+                        is_js = file.endswith((".js", ".jsx", ".ts", ".tsx"))
+                        is_java = file.endswith(".java")
+                        if not (is_py or is_js or is_java):
+                            continue
+                        _scanned_count += 1
+                        try:
+                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read()
                             found_keys: List[str] = []
                             if is_py:
                                 found_keys.extend(py_getenv.findall(content))
@@ -109,13 +126,18 @@ class EnvironmentService:
                                 found_keys.extend(node_envidx.findall(content))
                             elif is_java:
                                 found_keys.extend(java_getenv.findall(content))
-
                             for key in found_keys:
-                                var_sources.setdefault(key, set()).add(rel_path)
-                    except Exception as e:
-                        logger.warning(f"Failed to read file {rel_path} during env scan: {e}")
-        except Exception as e:
-            logger.error(f"Error walking files for environment scan: {e}")
+                                _found_vars.setdefault(key, set()).add(rel_path)
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.error(f"Error walking files for environment scan: {e}")
+            return _scanned_count, _found_vars
+
+        src_scanned_count, src_found_vars = await asyncio.to_thread(_scan_source_files_sync)
+        scanned_files_count += src_scanned_count
+        for key, sources in src_found_vars.items():
+            var_sources.setdefault(key, set()).update(sources)
 
         # 3. Consolidate results
         variables_list = []

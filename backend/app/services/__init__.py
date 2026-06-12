@@ -1,11 +1,9 @@
-from app.services.repo_service import repo_service
-from app.services.analysis_service import analysis_service
-from app.services.stack_service import stack_service
-from app.services.dependency_service import dependency_service
-from app.services.environment_service import environment_service
-from app.services.documentation_service import documentation_service
-from app.services.vector_service import vector_service
-
+# app/services/__init__.py
+# Intentionally avoids eager imports to prevent circular import with app.ai.graph.
+# Import services directly where needed:
+#   from app.services.repo_service import repo_service
+#   from app.services.analysis_service import analysis_service
+#   etc.
 __all__ = [
     "repo_service",
     "analysis_service",

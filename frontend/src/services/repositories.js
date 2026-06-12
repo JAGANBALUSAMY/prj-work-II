@@ -34,3 +34,13 @@ export const getRepositoryDocumentation = async (id) => {
   const response = await api.get(`/repositories/${id}/documentation`)
   return response.data
 }
+
+export const deleteRepository = async (id) => {
+  const response = await api.delete(`/repositories/${id}`)
+  return response.data
+}
+
+export const deleteAllRepositories = async () => {
+  const response = await api.delete('/repositories')
+  return response.data
+}

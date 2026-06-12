@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import logging
 from uuid import UUID
 from typing import Dict, Any, List, Optional
@@ -32,24 +33,36 @@ class DocumentationService:
             await repository_repo.update(db, db_obj=repo, obj_in={"documentation_profile": profile})
             return profile
 
-        # Read README content
+        # Read README content asynchronously
         try:
-            with open(readme_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
+            content = await asyncio.to_thread(
+                lambda: open(readme_path, "r", encoding="utf-8", errors="ignore").read()
+            )
         except Exception as e:
             logger.error(f"Failed to read README file at {readme_path}: {e}")
             profile = cls._empty_profile(f"Error reading README file: {str(e)}")
             await repository_repo.update(db, db_obj=repo, obj_in={"documentation_profile": profile})
             return profile
 
-        # Choose analysis method: Rule-Based Parser (default)
-        # In the future, this can be toggled or merged with LLM analysis:
-        # if settings.USE_LLM_ANALYSIS:
-        #     profile = await cls._analyze_with_llm(content)
-        # else:
-        #     profile = cls._analyze_with_rules(content)
-        
-        profile = cls._analyze_with_rules(content, os.path.basename(readme_path))
+        # Detect bonus documentation files (LICENSE, CONTRIBUTING, pyproject.toml)
+        root_dir = repo.local_path
+        has_license = any(
+            os.path.exists(os.path.join(root_dir, f))
+            for f in ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENSE.rst", "license", "LICENCE"]
+        )
+        has_contributing = any(
+            os.path.exists(os.path.join(root_dir, f))
+            for f in ["CONTRIBUTING.md", "CONTRIBUTING", "CONTRIBUTING.rst", "CONTRIBUTING.txt"]
+        )
+        has_pyproject = os.path.exists(os.path.join(root_dir, "pyproject.toml"))
+
+        profile = cls._analyze_with_rules(
+            content,
+            os.path.basename(readme_path),
+            has_license=has_license,
+            has_contributing=has_contributing,
+            has_pyproject=has_pyproject,
+        )
 
         # Update database Repository record
         await repository_repo.update(db, db_obj=repo, obj_in={"documentation_profile": profile})
@@ -74,7 +87,14 @@ class DocumentationService:
         return None
 
     @classmethod
-    def _analyze_with_rules(cls, content: str, filename: str) -> Dict[str, Any]:
+    def _analyze_with_rules(
+        cls,
+        content: str,
+        filename: str,
+        has_license: bool = False,
+        has_contributing: bool = False,
+        has_pyproject: bool = False,
+    ) -> Dict[str, Any]:
         """Rule-based parsing logic to score README sections and extract details"""
         
         # 1. Project Description (Weight: 15%)
@@ -170,15 +190,23 @@ class DocumentationService:
             api_score = 40
             api_feedback = "API keywords detected, but no formal API docs section exists."
 
-        # Compute weighted overall score
-        completeness_score = int(
+        # Compute weighted overall score (core 6 sections = 90%, bonus files = 10%)
+        core_score = round(
             (desc_score * 0.15) +
             (install_score * 0.20) +
             (setup_score * 0.20) +
             (env_score * 0.15) +
             (usage_score * 0.15) +
-            (api_score * 0.15)
+            (api_score * 0.15),
+            1
         )
+        # Bonus: LICENSE (+5%), CONTRIBUTING (+5%) — reward open-source best practices
+        bonus = 0
+        if has_license:
+            bonus += 5
+        if has_contributing:
+            bonus += 5
+        completeness_score = min(100, round(core_score + bonus))
 
         # Build suggestions
         suggestions = []
@@ -194,6 +222,10 @@ class DocumentationService:
             suggestions.append("Add clear usage examples showing how to run the application locally or run tests.")
         if api_score < 100:
             suggestions.append("Document API endpoints, HTTP routes (GET/POST), request parameters, and response schemas.")
+        if not has_license:
+            suggestions.append("Add a LICENSE file to define the legal usage terms for your project.")
+        if not has_contributing:
+            suggestions.append("Add a CONTRIBUTING.md to guide new contributors on how to contribute to the project.")
 
         sections = [
             {"category": "Project Description", "score": desc_score, "found": desc_score > 0, "details": desc_feedback},
@@ -201,12 +233,18 @@ class DocumentationService:
             {"category": "Setup Instructions", "score": setup_score, "found": setup_score > 0, "details": setup_feedback},
             {"category": "Environment Variables", "score": env_score, "found": env_score > 0, "details": env_feedback},
             {"category": "Usage Examples", "score": usage_score, "found": usage_score > 0, "details": usage_feedback},
-            {"category": "API Documentation", "score": api_score, "found": api_score > 0, "details": api_feedback}
+            {"category": "API Documentation", "score": api_score, "found": api_score > 0, "details": api_feedback},
+            {"category": "LICENSE File", "score": 100 if has_license else 0, "found": has_license, "details": "LICENSE file found." if has_license else "No LICENSE file detected."},
+            {"category": "CONTRIBUTING Guide", "score": 100 if has_contributing else 0, "found": has_contributing, "details": "CONTRIBUTING file found." if has_contributing else "No CONTRIBUTING file detected."},
         ]
+        if has_pyproject:
+            sections.append({"category": "pyproject.toml", "score": 100, "found": True, "details": "pyproject.toml found — modern Python packaging standard."})
 
+        bonus_found = sum(1 for s in sections[6:] if s["found"])
         report_summary = (
             f"Evaluated {filename}. Overall completeness score is {completeness_score}%. "
-            f"Detected {sum(1 for s in sections if s['found'])} out of 6 key documentation sections."
+            f"Detected {sum(1 for s in sections[:6] if s['found'])} out of 6 key documentation sections "
+            f"and {bonus_found} bonus quality indicators."
         )
 
         return {

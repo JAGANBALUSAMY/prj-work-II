@@ -216,3 +216,34 @@ async def get_repository_documentation(
         "repository_id": id,
         **profile
     }
+
+
+@router.delete("/{id}", status_code=status.HTTP_200_OK)
+async def delete_repository(
+    id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Deletes a specific repository and its associated analyses.
+    """
+    repo = await repository_repo.get(db, id)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Repository with ID {id} not found"
+        )
+    await repository_repo.remove(db, id=id)
+    return {"message": f"Repository {id} deleted successfully"}
+
+
+@router.delete("", status_code=status.HTTP_200_OK)
+async def delete_all_repositories(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Deletes all repositories and all associated analyses.
+    """
+    repos = await repository_repo.get_multi(db, limit=10000)
+    for r in repos:
+        await repository_repo.remove(db, id=r.id)
+    return {"message": "All repositories deleted successfully"}

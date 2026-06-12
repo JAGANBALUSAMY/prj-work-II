@@ -63,7 +63,7 @@ Ensure you have a PostgreSQL server running locally, and create a database calle
    ```bash
    python -m venv venv
    # On Windows:
-   .\venv\Scripts\activate
+   \venv\Scripts\activate
    ```
 3. Install dependencies:
    ```bash

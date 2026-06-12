@@ -2,11 +2,21 @@ import os
 import json
 import re
 import logging
+import asyncio
 import xml.etree.ElementTree as ET
 from uuid import UUID
 from typing import Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.repo_repo import repository_repo
+
+# Use stdlib tomllib (Python 3.11+) or fall back to tomli package
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 logger = logging.getLogger(__name__)
 
@@ -44,22 +54,27 @@ class DependencyService:
         # 1. Parse requirements.txt (Python)
         req_path = os.path.join(local_path, "requirements.txt")
         if os.path.exists(req_path):
-            cls._parse_requirements(req_path, dependencies, seen_deps)
+            await asyncio.to_thread(cls._parse_requirements, req_path, dependencies, seen_deps)
 
         # 2. Parse package.json (Node.js)
         pkg_path = os.path.join(local_path, "package.json")
         if os.path.exists(pkg_path):
-            cls._parse_package_json(pkg_path, dependencies, seen_deps)
+            await asyncio.to_thread(cls._parse_package_json, pkg_path, dependencies, seen_deps)
 
         # 3. Parse pom.xml (Java Maven)
         pom_path = os.path.join(local_path, "pom.xml")
         if os.path.exists(pom_path):
-            cls._parse_pom_xml(pom_path, dependencies, seen_deps)
+            await asyncio.to_thread(cls._parse_pom_xml, pom_path, dependencies, seen_deps)
 
         # 4. Parse build.gradle (Java Gradle)
         gradle_path = os.path.join(local_path, "build.gradle")
         if os.path.exists(gradle_path):
-            cls._parse_build_gradle(gradle_path, dependencies, seen_deps)
+            await asyncio.to_thread(cls._parse_build_gradle, gradle_path, dependencies, seen_deps)
+
+        # 5. Parse pyproject.toml (modern Python: Poetry, PEP 621, Hatch, PDM, uv, Flit)
+        pyproject_path = os.path.join(local_path, "pyproject.toml")
+        if os.path.exists(pyproject_path):
+            await asyncio.to_thread(cls._parse_pyproject_toml, pyproject_path, dependencies, seen_deps)
 
         # Compile warnings:
         
@@ -317,5 +332,115 @@ class DependencyService:
                         seen_deps.setdefault((name.lower(), source_file), []).append(version)
         except Exception as e:
             logger.error(f"Failed to parse build.gradle: {e}")
+
+    @classmethod
+    def _parse_pyproject_toml(
+        cls,
+        file_path: str,
+        dependencies: List[Dict[str, Any]],
+        seen_deps: Dict[tuple, List[str]]
+    ) -> None:
+        """
+        Parses pyproject.toml for Python dependencies across all common formats:
+        - PEP 621 / Hatch / Flit: [project.dependencies] and [project.optional-dependencies]
+        - PEP 517 build system:   [build-system.requires]
+        - Poetry:                 [tool.poetry.dependencies] and [tool.poetry.group.*.dependencies]
+        """
+        source_file = "pyproject.toml"
+        if tomllib is None:
+            logger.warning("tomllib/tomli not available; skipping pyproject.toml parsing. Install 'tomli' for Python < 3.11.")
+            return
+        try:
+            with open(file_path, "rb") as f:
+                data = tomllib.load(f)
+        except Exception as e:
+            logger.error(f"Failed to read/parse pyproject.toml: {e}")
+            return
+
+        def _add_dep(name: str, version_spec: str, dep_type: str) -> None:
+            """Normalises and records one dependency entry."""
+            if not name or name.lower() == "python":
+                return
+            # Strip extras from name, e.g. "requests[security]" → "requests[security]"
+            clean_name = name.strip()
+            # Normalise version: keep constraint string, or 'unspecified'
+            version = version_spec.strip() if version_spec and version_spec.strip() not in ("*", "") else None
+
+            is_suspicious = False
+            reason = ""
+            if version_spec and ("git+" in version_spec or version_spec.startswith("http")):
+                is_suspicious = True
+                reason = "Direct VCS or HTTP reference instead of registry version."
+                version = "vcs-reference"
+
+            dep_obj: Dict[str, Any] = {
+                "name": clean_name,
+                "version": version,
+                "dependency_type": dep_type,
+                "source_file": source_file,
+                "is_suspicious": is_suspicious,
+            }
+            if is_suspicious:
+                dep_obj["suspicious_reason"] = reason
+
+            dependencies.append(dep_obj)
+            seen_deps.setdefault((clean_name.lower(), source_file), []).append(version or "unspecified")
+
+        def _extract_version_from_spec(spec: Any) -> str:
+            """Convert a TOML value into a human-readable version string."""
+            if isinstance(spec, str):
+                return spec
+            if isinstance(spec, dict):
+                # Poetry dict style: {version = "^1.0", optional = true}
+                return spec.get("version", "*")
+            return "*"
+
+        # ── PEP 621 / Hatch / Flit: [project.dependencies] ─────────────────
+        project = data.get("project", {})
+        for dep_str in project.get("dependencies", []):
+            if not isinstance(dep_str, str):
+                continue
+            # PEP 508 format: "requests>=2.28", "httpx[http2]>=0.23"
+            m = re.match(r'^([A-Za-z0-9_\-\.\[\]]+)\s*(.*)', dep_str.strip())
+            if m:
+                _add_dep(m.group(1), m.group(2) or None, "direct")
+
+        # ── PEP 621 optional extras: [project.optional-dependencies] ────────
+        for group_name, deps in project.get("optional-dependencies", {}).items():
+            for dep_str in (deps or []):
+                if not isinstance(dep_str, str):
+                    continue
+                m = re.match(r'^([A-Za-z0-9_\-\.\[\]]+)\s*(.*)', dep_str.strip())
+                if m:
+                    _add_dep(m.group(1), m.group(2) or None, f"optional:{group_name}")
+
+        # ── PEP 517 build system: [build-system.requires] ───────────────────
+        build_system = data.get("build-system", {})
+        for dep_str in build_system.get("requires", []):
+            if not isinstance(dep_str, str):
+                continue
+            m = re.match(r'^([A-Za-z0-9_\-\.\[\]]+)\s*(.*)', dep_str.strip())
+            if m:
+                _add_dep(m.group(1), m.group(2) or None, "build")
+
+        # ── Poetry: [tool.poetry.dependencies] ──────────────────────────────
+        tool = data.get("tool", {})
+        poetry = tool.get("poetry", {})
+
+        for name, spec in poetry.get("dependencies", {}).items():
+            _add_dep(name, _extract_version_from_spec(spec), "direct")
+
+        # ── Poetry dev / group dependencies ──────────────────────────────────
+        # Legacy: [tool.poetry.dev-dependencies]
+        for name, spec in poetry.get("dev-dependencies", {}).items():
+            _add_dep(name, _extract_version_from_spec(spec), "development")
+
+        # Modern: [tool.poetry.group.<name>.dependencies]
+        for group_name, group_data in poetry.get("group", {}).items():
+            if isinstance(group_data, dict):
+                for name, spec in group_data.get("dependencies", {}).items():
+                    _add_dep(name, _extract_version_from_spec(spec), f"group:{group_name}")
+
+        logger.info(f"pyproject.toml parsed: {len([d for d in dependencies if d['source_file'] == source_file])} dependencies found.")
 
 dependency_service = DependencyService()
