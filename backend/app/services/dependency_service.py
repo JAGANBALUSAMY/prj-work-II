@@ -51,30 +51,38 @@ class DependencyService:
         # Dictionary to track duplicate packages: (lowercase_name, source_file) -> list of versions
         seen_deps: Dict[tuple, List[str]] = {}
 
-        # 1. Parse requirements.txt (Python)
-        req_path = os.path.join(local_path, "requirements.txt")
-        if os.path.exists(req_path):
-            await asyncio.to_thread(cls._parse_requirements, req_path, dependencies, seen_deps)
+        # Scan for dependency configuration files recursively
+        def _scan_and_parse_dependencies_sync():
+            for root, dirs, files in os.walk(local_path):
+                dirs[:] = [
+                    d for d in dirs
+                    if not d.startswith('.')
+                    and d not in ('venv', '.venv', 'node_modules', 'dist', 'target', 'build', '__pycache__')
+                ]
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(file_path, local_path)
+                    
+                    if file == "requirements.txt":
+                        cls._parse_requirements(file_path, dependencies, seen_deps, rel_path)
+                    elif file == "package.json":
+                        cls._parse_package_json(file_path, dependencies, seen_deps, rel_path)
+                    elif file == "pom.xml":
+                        cls._parse_pom_xml(file_path, dependencies, seen_deps, rel_path)
+                    elif file == "build.gradle":
+                        cls._parse_build_gradle(file_path, dependencies, seen_deps, rel_path)
+                    elif file == "pyproject.toml":
+                        cls._parse_pyproject_toml(file_path, dependencies, seen_deps, rel_path)
+                    elif file == "go.mod":
+                        cls._parse_go_mod(file_path, dependencies, seen_deps, rel_path)
+                    elif file == "Cargo.toml":
+                        cls._parse_cargo_toml(file_path, dependencies, seen_deps, rel_path)
+                    elif file == "composer.json":
+                        cls._parse_composer_json(file_path, dependencies, seen_deps, rel_path)
+                    elif file == "Gemfile":
+                        cls._parse_gemfile(file_path, dependencies, seen_deps, rel_path)
 
-        # 2. Parse package.json (Node.js)
-        pkg_path = os.path.join(local_path, "package.json")
-        if os.path.exists(pkg_path):
-            await asyncio.to_thread(cls._parse_package_json, pkg_path, dependencies, seen_deps)
-
-        # 3. Parse pom.xml (Java Maven)
-        pom_path = os.path.join(local_path, "pom.xml")
-        if os.path.exists(pom_path):
-            await asyncio.to_thread(cls._parse_pom_xml, pom_path, dependencies, seen_deps)
-
-        # 4. Parse build.gradle (Java Gradle)
-        gradle_path = os.path.join(local_path, "build.gradle")
-        if os.path.exists(gradle_path):
-            await asyncio.to_thread(cls._parse_build_gradle, gradle_path, dependencies, seen_deps)
-
-        # 5. Parse pyproject.toml (modern Python: Poetry, PEP 621, Hatch, PDM, uv, Flit)
-        pyproject_path = os.path.join(local_path, "pyproject.toml")
-        if os.path.exists(pyproject_path):
-            await asyncio.to_thread(cls._parse_pyproject_toml, pyproject_path, dependencies, seen_deps)
+        await asyncio.to_thread(_scan_and_parse_dependencies_sync)
 
         # Compile warnings:
         
@@ -136,8 +144,7 @@ class DependencyService:
         return profile
 
     @classmethod
-    def _parse_requirements(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]]) -> None:
-        source_file = "requirements.txt"
+    def _parse_requirements(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]], source_file: str = "requirements.txt") -> None:
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
@@ -184,8 +191,7 @@ class DependencyService:
             logger.error(f"Failed to parse requirements.txt: {e}")
 
     @classmethod
-    def _parse_package_json(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]]) -> None:
-        source_file = "package.json"
+    def _parse_package_json(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]], source_file: str = "package.json") -> None:
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 pkg = json.load(f)
@@ -226,8 +232,7 @@ class DependencyService:
             seen_deps.setdefault((name.lower(), source_file), []).append(version or "unspecified")
 
     @classmethod
-    def _parse_pom_xml(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]]) -> None:
-        source_file = "pom.xml"
+    def _parse_pom_xml(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]], source_file: str = "pom.xml") -> None:
         try:
             tree = ET.parse(file_path)
             root = tree.getroot()
@@ -272,8 +277,7 @@ class DependencyService:
             logger.error(f"Failed to parse pom.xml: {e}")
 
     @classmethod
-    def _parse_build_gradle(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]]) -> None:
-        source_file = "build.gradle"
+    def _parse_build_gradle(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]], source_file: str = "build.gradle") -> None:
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
@@ -338,7 +342,8 @@ class DependencyService:
         cls,
         file_path: str,
         dependencies: List[Dict[str, Any]],
-        seen_deps: Dict[tuple, List[str]]
+        seen_deps: Dict[tuple, List[str]],
+        source_file: str = "pyproject.toml"
     ) -> None:
         """
         Parses pyproject.toml for Python dependencies across all common formats:
@@ -346,7 +351,6 @@ class DependencyService:
         - PEP 517 build system:   [build-system.requires]
         - Poetry:                 [tool.poetry.dependencies] and [tool.poetry.group.*.dependencies]
         """
-        source_file = "pyproject.toml"
         if tomllib is None:
             logger.warning("tomllib/tomli not available; skipping pyproject.toml parsing. Install 'tomli' for Python < 3.11.")
             return
@@ -442,5 +446,116 @@ class DependencyService:
                     _add_dep(name, _extract_version_from_spec(spec), f"group:{group_name}")
 
         logger.info(f"pyproject.toml parsed: {len([d for d in dependencies if d['source_file'] == source_file])} dependencies found.")
+
+    @classmethod
+    def _parse_go_mod(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]], source_file: str = "go.mod") -> None:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            matches = re.findall(r"""\b([a-zA-Z0-9_\-\.\/]+)\s+(v[0-9]+\.[0-9]+\.[0-9]+[a-zA-Z0-9_\-\.]*)""", content)
+            for name, version in matches:
+                if name == "go" or name.startswith("require") or name.startswith("exclude") or name.startswith("replace"):
+                    continue
+                dep_obj = {
+                    "name": name,
+                    "version": version,
+                    "dependency_type": "direct",
+                    "source_file": source_file,
+                    "is_suspicious": False
+                }
+                dependencies.append(dep_obj)
+                seen_deps.setdefault((name.lower(), source_file), []).append(version)
+        except Exception as e:
+            logger.error(f"Failed to parse go.mod: {e}")
+
+    @classmethod
+    def _parse_cargo_toml(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]], source_file: str = "Cargo.toml") -> None:
+        try:
+            if tomllib is not None:
+                with open(file_path, "rb") as f:
+                    data = tomllib.load(f)
+                for dep_sec in ("dependencies", "dev-dependencies", "build-dependencies"):
+                    deps = data.get(dep_sec, {})
+                    if isinstance(deps, dict):
+                        for name, val in deps.items():
+                            version = "unspecified"
+                            is_suspicious = False
+                            reason = ""
+                            if isinstance(val, str):
+                                version = val
+                            elif isinstance(val, dict):
+                                version = val.get("version", "unspecified")
+                                if "git" in val or "path" in val:
+                                    is_suspicious = True
+                                    reason = "Uses git or local path instead of registry version constraint."
+                            dep_obj = {
+                                "name": name,
+                                "version": version if version != "unspecified" else None,
+                                "dependency_type": "production" if dep_sec == "dependencies" else "development",
+                                "source_file": source_file,
+                                "is_suspicious": is_suspicious
+                            }
+                            if is_suspicious:
+                                dep_obj["suspicious_reason"] = reason
+                            dependencies.append(dep_obj)
+                            seen_deps.setdefault((name.lower(), source_file), []).append(version)
+        except Exception as e:
+            logger.error(f"Failed to parse Cargo.toml: {e}")
+
+    @classmethod
+    def _parse_composer_json(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]], source_file: str = "composer.json") -> None:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                pkg = json.load(f)
+            reqs = pkg.get("require", {})
+            for name, version in reqs.items():
+                if name.lower() == "php":
+                    continue
+                dep_obj = {
+                    "name": name,
+                    "version": version if version else None,
+                    "dependency_type": "production",
+                    "source_file": source_file,
+                    "is_suspicious": False
+                }
+                dependencies.append(dep_obj)
+                seen_deps.setdefault((name.lower(), source_file), []).append(version or "unspecified")
+            reqs_dev = pkg.get("require-dev", {})
+            for name, version in reqs_dev.items():
+                dep_obj = {
+                    "name": name,
+                    "version": version if version else None,
+                    "dependency_type": "development",
+                    "source_file": source_file,
+                    "is_suspicious": False
+                }
+                dependencies.append(dep_obj)
+                seen_deps.setdefault((name.lower(), source_file), []).append(version or "unspecified")
+        except Exception as e:
+            logger.error(f"Failed to parse composer.json: {e}")
+
+    @classmethod
+    def _parse_gemfile(cls, file_path: str, dependencies: List[Dict[str, Any]], seen_deps: Dict[tuple, List[str]], source_file: str = "Gemfile") -> None:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    match = re.match(r"""^\s*gem\s+['"]([^'"]+)['"](?:\s*,\s*['"]([^'"]+)['"])?""", line)
+                    if match:
+                        name = match.group(1)
+                        version = match.group(2) if match.group(2) else "unspecified"
+                        dep_obj = {
+                            "name": name,
+                            "version": version if version != "unspecified" else None,
+                            "dependency_type": "production",
+                            "source_file": source_file,
+                            "is_suspicious": False
+                        }
+                        dependencies.append(dep_obj)
+                        seen_deps.setdefault((name.lower(), source_file), []).append(version)
+        except Exception as e:
+            logger.error(f"Failed to parse Gemfile: {e}")
 
 dependency_service = DependencyService()

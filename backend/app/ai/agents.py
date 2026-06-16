@@ -270,10 +270,13 @@ Scanners Metadata:
 - Total Dependencies: {deps_count}
 - Reconstructed Env Variables: {env_vars_count}
 
+Instruction on Directory Layout and Project Structure:
+Look closely at the `modules` key inside `Technology Stack`. If multiple modules are detected (e.g. monorepo split into backend/frontend directories, client/server projects, etc.), you MUST explicitly describe this repository structure and directory layout in the `executive_summary`. Explain where the backend and frontend modules reside (e.g. backend at "FULLSATCK/backend" and frontend at "FULLSATCK/frontend") and how they interact.
+
 Generate a JSON object with EXACTLY the following keys. Do not include any other text:
 {{
   "repository_health": "Good" | "Moderate" | "Poor",
-  "executive_summary": "A professional executive summary outlining what the repository is, its tech stack, and ready-to-run evaluation.",
+  "executive_summary": "A professional executive summary outlining what the repository is, its tech stack, its directory layout / monorepo structure (referencing specific folders in 'modules' list), and ready-to-run evaluation.",
   "risk_assessment": "Overall summary of reproducibility and survivability risks (such as missing docker, unpinned dependencies, low activity).",
   "strengths": ["Strength 1", "Strength 2", ...],
   "weaknesses": ["Weakness 1", "Weakness 2", ...]
@@ -341,18 +344,26 @@ Generate a JSON object with EXACTLY the following keys. Do not include any other
         if not weaknesses:
             weaknesses.append("No testing framework files detected in root configuration.")
             
+        # Check for modules layout in tech_stack to build description
+        modules = tech_stack.get("modules", []) if tech_stack else []
+        structure_desc = ""
+        if len(modules) > 1:
+            structure_desc = " The repository is structured as a monorepo with multiple modules: " + ", ".join([f"'{m.get('path')}' ({m.get('role')})" for m in modules]) + "."
+        elif len(modules) == 1:
+            structure_desc = f" The repository layout contains a single module at '{modules[0].get('path')}' ({modules[0].get('role')})."
+
         # Health check
         if doc_score >= 85 and has_docker and contributors >= 2:
             health = "Good"
-            exec_summary = f"The repository represents a highly reproducible and stable workspace. Built using {', '.join(tech_stack.get('backend', [])) if tech_stack else 'standard technologies'}, it includes virtualized containers and comprehensive docs."
+            exec_summary = f"The repository represents a highly reproducible and stable workspace. Built using {', '.join(tech_stack.get('backend', [])) if tech_stack else 'standard technologies'}, it includes virtualized containers and comprehensive docs.{structure_desc}"
             risk = "Low risk. Robust configuration setups minimize environmental and reproducibility issues."
         elif doc_score >= 50 or has_docker:
             health = "Moderate"
-            exec_summary = f"The repository is moderately structured. It utilizes a stack consisting of {', '.join(tech_stack.get('backend', [])) if tech_stack else 'custom packages'}, but could be improved by standardizing virtualized environments and polishing docs."
+            exec_summary = f"The repository is moderately structured. It utilizes a stack consisting of {', '.join(tech_stack.get('backend', [])) if tech_stack else 'custom packages'}, but could be improved by standardizing virtualized environments and polishing docs.{structure_desc}"
             risk = "Medium risk. Missing or unpinned configurations might result in minor setup challenges."
         else:
             health = "Poor"
-            exec_summary = "The repository exhibits poor reproducibility configurations. Lacking Docker wrappers, explicit dependency pinning, and onboarding docs, it will require manual developer troubleshooting to launch."
+            exec_summary = f"The repository exhibits poor reproducibility configurations. Lacking Docker wrappers, explicit dependency pinning, and onboarding docs, it will require manual developer troubleshooting to launch.{structure_desc}"
             risk = "High risk. Large reproduction overhead with a high probability of environment drift."
 
         return {

@@ -37,53 +37,54 @@ class EnvironmentService:
         scanned_files_count = 0
         template_files_found = []
 
-        # 1. Scan standard template files
-        env_templates = [".env.example", ".env.template", ".env.sample"]
-        for t_file in env_templates:
-            t_path = os.path.join(local_path, t_file)
-            if os.path.exists(t_path):
-                template_files_found.append(t_file)
-                scanned_files_count += 1
-                try:
-                    with open(t_path, "r", encoding="utf-8", errors="ignore") as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line or line.startswith("#"):
-                                continue
-                            match = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*=", line)
-                            if match:
-                                key = match.group(1)
-                                template_vars.add(key)
-                                var_sources.setdefault(key, set()).add(t_file)
-                except Exception as e:
-                    logger.error(f"Error reading env template {t_file} in {local_path}: {e}")
-
-        # 2. Scan docker-compose.yml / docker-compose.yaml for environment keys
-        dc_names = ["docker-compose.yml", "docker-compose.yaml"]
-        for dc_name in dc_names:
-            dc_path = os.path.join(local_path, dc_name)
-            if os.path.exists(dc_path):
-                template_files_found.append(dc_name)
-                scanned_files_count += 1
-                try:
-                    with open(dc_path, "r", encoding="utf-8", errors="ignore") as f:
-                        dc_content = f.read()
-                    # Match both `KEY=VALUE` and bare `KEY:` under environment: sections
-                    # Pattern 1: bare variable (just key name in list) e.g. `- DATABASE_URL`
-                    for key in re.findall(r"^\s*-\s+([A-Z_][A-Z0-9_]{2,})\s*$", dc_content, re.MULTILINE):
-                        template_vars.add(key)
-                        var_sources.setdefault(key, set()).add(dc_name)
-                    # Pattern 2: key=value style `- DATABASE_URL=postgres://...`
-                    for key in re.findall(r"^\s*-\s+([A-Z_][A-Z0-9_]{2,})\s*=", dc_content, re.MULTILINE):
-                        template_vars.add(key)
-                        var_sources.setdefault(key, set()).add(dc_name)
-                    # Pattern 3: map style `DATABASE_URL: postgres://...`
-                    for key in re.findall(r"^\s{4,}([A-Z_][A-Z0-9_]{2,}):\s", dc_content, re.MULTILINE):
-                        template_vars.add(key)
-                        var_sources.setdefault(key, set()).add(dc_name)
-                except Exception as e:
-                    logger.error(f"Error scanning {dc_name} for env vars in {local_path}: {e}")
-                break  # only scan one docker-compose file
+        # 1. Scan standard template/env files recursively
+        for root, dirs, files in os.walk(local_path):
+            dirs[:] = [
+                d for d in dirs
+                if not d.startswith('.')
+                and d not in ('venv', '.venv', 'node_modules', 'dist', 'target', 'build', '__pycache__')
+            ]
+            for file in files:
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, local_path)
+                
+                # Check for env files
+                if file.startswith(".env") or "env.example" in file.lower() or "env.template" in file.lower() or "env.sample" in file.lower():
+                    template_files_found.append(rel_path)
+                    scanned_files_count += 1
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            for line in f:
+                                line = line.strip()
+                                if not line or line.startswith("#"):
+                                    continue
+                                match = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*=", line)
+                                if match:
+                                    key = match.group(1)
+                                    template_vars.add(key)
+                                    var_sources.setdefault(key, set()).add(rel_path)
+                    except Exception as e:
+                        logger.error(f"Error reading env file {rel_path} in {local_path}: {e}")
+                        
+                # Check for docker-compose files
+                elif file in ("docker-compose.yml", "docker-compose.yaml"):
+                    template_files_found.append(rel_path)
+                    scanned_files_count += 1
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            dc_content = f.read()
+                        # Match both `KEY=VALUE` and bare `KEY:` under environment: sections
+                        for key in re.findall(r"^\s*-\s+([A-Z_][A-Z0-9_]{2,})\s*$", dc_content, re.MULTILINE):
+                            template_vars.add(key)
+                            var_sources.setdefault(key, set()).add(rel_path)
+                        for key in re.findall(r"^\s*-\s+([A-Z_][A-Z0-9_]{2,})\s*=", dc_content, re.MULTILINE):
+                            template_vars.add(key)
+                            var_sources.setdefault(key, set()).add(rel_path)
+                        for key in re.findall(r"^\s{4,}([A-Z_][A-Z0-9_]{2,}):\s", dc_content, re.MULTILINE):
+                            template_vars.add(key)
+                            var_sources.setdefault(key, set()).add(rel_path)
+                    except Exception as e:
+                        logger.error(f"Error scanning {rel_path} for env vars in {local_path}: {e}")
 
         # 3. Scan source code files using asyncio.to_thread for non-blocking I/O
         # Regex patterns for env var detection
@@ -93,6 +94,16 @@ class EnvironmentService:
         node_envdot = re.compile(r"""\bprocess\.env\.([a-zA-Z_][a-zA-Z0-9_]*)\b""")
         node_envidx = re.compile(r"""\bprocess\.env\[\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
         java_getenv = re.compile(r"""\bSystem\.getenv\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
+        go_getenv = re.compile(r"""\bos\.Getenv\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
+        go_envlook = re.compile(r"""\bos\.LookupEnv\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
+        rust_envvar = re.compile(r"""\benv::var\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
+        rust_dotenv = re.compile(r"""\bdotenv::var\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
+        php_getenv = re.compile(r"""\bgetenv\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
+        php_envarr = re.compile(r"""\$_ENV\[\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]\]""")
+        php_srvarr = re.compile(r"""\$_SERVER\[\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]\]""")
+        ruby_envidx = re.compile(r"""\bENV\[\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]\]""")
+        ruby_envfetch = re.compile(r"""\bENV\.fetch\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
+        cs_getenv = re.compile(r"""\bEnvironment\.GetEnvironmentVariable\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]""")
 
         def _scan_source_files_sync():
             _scanned_count = 0
@@ -110,7 +121,12 @@ class EnvironmentService:
                         is_py = file.endswith(".py")
                         is_js = file.endswith((".js", ".jsx", ".ts", ".tsx"))
                         is_java = file.endswith(".java")
-                        if not (is_py or is_js or is_java):
+                        is_go = file.endswith(".go")
+                        is_rs = file.endswith(".rs")
+                        is_php = file.endswith(".php")
+                        is_rb = file.endswith(".rb")
+                        is_cs = file.endswith(".cs")
+                        if not (is_py or is_js or is_java or is_go or is_rs or is_php or is_rb or is_cs):
                             continue
                         _scanned_count += 1
                         try:
@@ -126,6 +142,21 @@ class EnvironmentService:
                                 found_keys.extend(node_envidx.findall(content))
                             elif is_java:
                                 found_keys.extend(java_getenv.findall(content))
+                            elif is_go:
+                                found_keys.extend(go_getenv.findall(content))
+                                found_keys.extend(go_envlook.findall(content))
+                            elif is_rs:
+                                found_keys.extend(rust_envvar.findall(content))
+                                found_keys.extend(rust_dotenv.findall(content))
+                            elif is_php:
+                                found_keys.extend(php_getenv.findall(content))
+                                found_keys.extend(php_envarr.findall(content))
+                                found_keys.extend(php_srvarr.findall(content))
+                            elif is_rb:
+                                found_keys.extend(ruby_envidx.findall(content))
+                                found_keys.extend(ruby_envfetch.findall(content))
+                            elif is_cs:
+                                found_keys.extend(cs_getenv.findall(content))
                             for key in found_keys:
                                 _found_vars.setdefault(key, set()).add(rel_path)
                         except Exception:
@@ -146,7 +177,7 @@ class EnvironmentService:
         for key in sorted_keys:
             sources = sorted(list(var_sources[key]))
             # Determine if this variable is missing in template files but used in code
-            is_missing_from_templates = len(template_files_found) > 0 and not any(t in sources for t in env_templates)
+            is_missing_from_templates = len(template_files_found) > 0 and not any(t in sources for t in template_files_found)
             
             variables_list.append({
                 "name": key,

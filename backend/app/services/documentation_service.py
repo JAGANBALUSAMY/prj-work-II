@@ -26,21 +26,30 @@ class DocumentationService:
             logger.warning(f"Repository {repo_id} path '{repo.local_path if repo else 'None'}' does not exist. Skipping doc scan.")
             return cls._empty_profile("Repository path not found.")
 
-        # Resolve README file path
-        readme_path = cls._find_readme_path(repo.local_path)
-        if not readme_path:
-            profile = cls._empty_profile("No README.md found in the repository root.")
+        # Find all README file paths recursively
+        readme_paths = cls._find_all_readme_paths(repo.local_path)
+        if not readme_paths:
+            profile = cls._empty_profile("No README.md found in the repository.")
             await repository_repo.update(db, db_obj=repo, obj_in={"documentation_profile": profile})
             return profile
 
-        # Read README content asynchronously
-        try:
-            content = await asyncio.to_thread(
-                lambda: open(readme_path, "r", encoding="utf-8", errors="ignore").read()
-            )
-        except Exception as e:
-            logger.error(f"Failed to read README file at {readme_path}: {e}")
-            profile = cls._empty_profile(f"Error reading README file: {str(e)}")
+        # Read README contents asynchronously
+        def _read_all_readmes_sync():
+            contents = []
+            scanned_files = []
+            for r_path in readme_paths:
+                rel = os.path.relpath(r_path, repo.local_path)
+                try:
+                    with open(r_path, "r", encoding="utf-8", errors="ignore") as f:
+                        contents.append(f"--- Document: {rel} ---\n" + f.read())
+                        scanned_files.append(rel)
+                except Exception as e:
+                    logger.error(f"Failed to read README at {r_path}: {e}")
+            return "\n\n".join(contents), ", ".join(scanned_files)
+
+        content, scanned_files_str = await asyncio.to_thread(_read_all_readmes_sync)
+        if not content.strip():
+            profile = cls._empty_profile("Found README file(s) but they were empty or unreadable.")
             await repository_repo.update(db, db_obj=repo, obj_in={"documentation_profile": profile})
             return profile
 
@@ -58,7 +67,7 @@ class DocumentationService:
 
         profile = cls._analyze_with_rules(
             content,
-            os.path.basename(readme_path),
+            scanned_files_str,
             has_license=has_license,
             has_contributing=has_contributing,
             has_pyproject=has_pyproject,
@@ -70,21 +79,22 @@ class DocumentationService:
         return profile
 
     @classmethod
-    def _find_readme_path(cls, root_dir: str) -> Optional[str]:
-        """Looks for common README filenames in the repository root (case-insensitive)"""
-        candidates = ["README.md", "README.markdown", "readme.md", "README.txt", "README"]
-        for candidate in candidates:
-            path = os.path.join(root_dir, candidate)
-            if os.path.exists(path):
-                return path
-        # Try a case-insensitive match for anything starting with 'readme' in root directory
+    def _find_all_readme_paths(cls, root_dir: str) -> List[str]:
+        """Looks for README files recursively inside the repository folder, ignoring common dependency paths"""
+        readme_paths = []
         try:
-            for item in os.listdir(root_dir):
-                if item.lower().startswith("readme") and os.path.isfile(os.path.join(root_dir, item)):
-                    return os.path.join(root_dir, item)
-        except Exception:
-            pass
-        return None
+            for root, dirs, files in os.walk(root_dir):
+                dirs[:] = [
+                    d for d in dirs
+                    if not d.startswith('.')
+                    and d not in ('venv', '.venv', 'node_modules', 'dist', 'target', 'build', '__pycache__')
+                ]
+                for file in files:
+                    if file.lower().startswith("readme") and file.lower().endswith((".md", ".markdown", ".txt", "")):
+                        readme_paths.append(os.path.join(root, file))
+        except Exception as e:
+            logger.error(f"Error walking directories for README files: {e}")
+        return readme_paths
 
     @classmethod
     def _analyze_with_rules(
