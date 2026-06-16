@@ -15,6 +15,9 @@ from app.services.environment_service import environment_service
 from app.services.documentation_service import documentation_service
 from app.services.vector_service import vector_service
 
+from app.api.endpoints.auth import get_current_active_user
+from app.models.user import User
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -34,7 +37,8 @@ async def background_acquire_and_analyze(repo_id: UUID, clone_url: str):
 async def analyze_repository(
     payload: RepositoryCreate,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Accepts a GitHub repository clone URL, validates it, inserts it into the database,

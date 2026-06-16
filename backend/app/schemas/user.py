@@ -25,7 +25,16 @@ class UserResponse(UserInDBBase):
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
+    user: UserResponse
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str

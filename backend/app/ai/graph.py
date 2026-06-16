@@ -29,6 +29,9 @@ class AnalysisState(TypedDict):
     summary: str
     findings: Dict[str, Any]
     logs: List[str]
+    ai_documentation: Dict[str, Any]
+    ai_dependency: Dict[str, Any]
+    ai_summary: Dict[str, Any]
 
 # --- Node Implementations ---
 
@@ -191,6 +194,28 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
         try:
             repo = await repository_repo.get(db, repo_id)
             
+            # Save AI results to Repository JSONB columns
+            ai_doc = state.get("ai_documentation")
+            if ai_doc:
+                doc_profile = dict(repo.documentation_profile) if repo.documentation_profile else {}
+                doc_profile["ai_analysis"] = ai_doc
+                await repository_repo.update(db, db_obj=repo, obj_in={"documentation_profile": doc_profile})
+                
+            ai_dep = state.get("ai_dependency")
+            if ai_dep:
+                dep_profile = dict(repo.dependencies_profile) if repo.dependencies_profile else {}
+                dep_profile["ai_analysis"] = ai_dep
+                await repository_repo.update(db, db_obj=repo, obj_in={"dependencies_profile": dep_profile})
+                
+            ai_sum = state.get("ai_summary")
+            if ai_sum:
+                stack_profile = dict(repo.detected_stack) if repo.detected_stack else {}
+                stack_profile["ai_analysis"] = ai_sum
+                await repository_repo.update(db, db_obj=repo, obj_in={"detected_stack": stack_profile})
+
+            # Re-fetch repo to get the latest updated profile fields for indexing
+            repo = await repository_repo.get(db, repo_id)
+            
             # Index metadata in vector DB
             await vector_service.index_repository_metadata(repo)
             
@@ -283,6 +308,116 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
                 "logs": logs
             }
 
+async def ai_documentation_node(state: AnalysisState) -> Dict[str, Any]:
+    """
+    Node 7: Runs AI Documentation Agent on README and scores.
+    """
+    logs = state.get("logs", [])
+    if state.get("status") != "cloned":
+        logs.append("Node [ai_documentation]: Skipped (Repository not cloned).")
+        return {"logs": logs}
+        
+    logs.append("Node [ai_documentation]: Running AI Documentation Agent...")
+    repo_id = UUID(state["repository_id"])
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            repo = await repository_repo.get(db, repo_id)
+            if not repo or not repo.documentation_profile:
+                logs.append("Node [ai_documentation]: No documentation profile found.")
+                return {"logs": logs}
+                
+            readme_preview = repo.documentation_profile.get("readme_preview", "")
+            completeness_score = repo.documentation_profile.get("completeness_score", 0.0)
+            sections = repo.documentation_profile.get("sections", [])
+            
+            from app.ai.agents import AIDocumentationAgent
+            ai_doc = await AIDocumentationAgent.analyze(readme_preview, completeness_score, sections)
+            logs.append(f"Node [ai_documentation]: AI assessment complete. Quality: {ai_doc.get('documentation_quality')}")
+            return {
+                "logs": logs,
+                "ai_documentation": ai_doc
+            }
+        except Exception as e:
+            logs.append(f"Node [ai_documentation]: Exception occurred: {str(e)}")
+            return {"logs": logs}
+
+async def ai_dependency_node(state: AnalysisState) -> Dict[str, Any]:
+    """
+    Node 8: Runs AI Dependency Risk Agent on parsed dependency profile.
+    """
+    logs = state.get("logs", [])
+    if state.get("status") != "cloned":
+        logs.append("Node [ai_dependency]: Skipped (Repository not cloned).")
+        return {"logs": logs}
+        
+    logs.append("Node [ai_dependency]: Running AI Dependency Risk Agent...")
+    repo_id = UUID(state["repository_id"])
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            repo = await repository_repo.get(db, repo_id)
+            if not repo or not repo.dependencies_profile:
+                logs.append("Node [ai_dependency]: No dependency profile found.")
+                return {"logs": logs}
+                
+            dependencies = repo.dependencies_profile.get("dependencies", [])
+            report = repo.dependencies_profile.get("report", {})
+            
+            from app.ai.agents import AIDependencyAgent
+            ai_dep = await AIDependencyAgent.analyze(dependencies, report)
+            logs.append(f"Node [ai_dependency]: AI dependency risk audit complete. Risk: {ai_dep.get('risk_level')}")
+            return {
+                "logs": logs,
+                "ai_dependency": ai_dep
+            }
+        except Exception as e:
+            logs.append(f"Node [ai_dependency]: Exception occurred: {str(e)}")
+            return {"logs": logs}
+
+async def ai_repository_summary_node(state: AnalysisState) -> Dict[str, Any]:
+    """
+    Node 9: Runs AI Repository Summary Agent.
+    """
+    logs = state.get("logs", [])
+    if state.get("status") != "cloned":
+        logs.append("Node [ai_repository_summary]: Skipped (Repository not cloned).")
+        return {"logs": logs}
+        
+    logs.append("Node [ai_repository_summary]: Running AI Repository Executive Summary Agent...")
+    repo_id = UUID(state["repository_id"])
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            repo = await repository_repo.get(db, repo_id)
+            if not repo:
+                logs.append("Node [ai_repository_summary]: Repository record not found.")
+                return {"logs": logs}
+                
+            repo_meta = {
+                "stars": repo.stars,
+                "forks": repo.forks,
+                "contributors_count": repo.contributors_count,
+                "open_issues": repo.open_issues
+            }
+            tech_stack = repo.detected_stack or {}
+            dep_profile = repo.dependencies_profile or {}
+            env_profile = repo.environment_profile or {}
+            doc_profile = repo.documentation_profile or {}
+            
+            from app.ai.agents import AIRepositoryIntelligenceAgent
+            ai_sum = await AIRepositoryIntelligenceAgent.analyze(
+                repo_meta, tech_stack, dep_profile, env_profile, doc_profile
+            )
+            logs.append(f"Node [ai_repository_summary]: Executive summary generated. Health: {ai_sum.get('repository_health')}")
+            return {
+                "logs": logs,
+                "ai_summary": ai_sum
+            }
+        except Exception as e:
+            logs.append(f"Node [ai_repository_summary]: Exception occurred: {str(e)}")
+            return {"logs": logs}
+
 def build_workflow() -> Any:
     """
     Compiles the unified LangGraph state machine.
@@ -295,6 +430,9 @@ def build_workflow() -> Any:
     workflow.add_node("dependency_analysis", dependency_analysis_node)
     workflow.add_node("environment_reconstruction", environment_reconstruction_node)
     workflow.add_node("documentation_analysis", documentation_analysis_node)
+    workflow.add_node("ai_documentation", ai_documentation_node)
+    workflow.add_node("ai_dependency", ai_dependency_node)
+    workflow.add_node("ai_repository_summary", ai_repository_summary_node)
     workflow.add_node("store_results", store_results_node)
     
     # Establish Entry Point
@@ -305,7 +443,10 @@ def build_workflow() -> Any:
     workflow.add_edge("technology_discovery", "dependency_analysis")
     workflow.add_edge("dependency_analysis", "environment_reconstruction")
     workflow.add_edge("environment_reconstruction", "documentation_analysis")
-    workflow.add_edge("documentation_analysis", "store_results")
+    workflow.add_edge("documentation_analysis", "ai_documentation")
+    workflow.add_edge("ai_documentation", "ai_dependency")
+    workflow.add_edge("ai_dependency", "ai_repository_summary")
+    workflow.add_edge("ai_repository_summary", "store_results")
     workflow.add_edge("store_results", END)
     
     return workflow.compile()

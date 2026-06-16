@@ -42,7 +42,10 @@ class AnalysisService:
                 "survivability_score": 0.0,
                 "summary": "",
                 "findings": {},
-                "logs": ["State machine initialized."]
+                "logs": ["State machine initialized."],
+                "ai_documentation": {},
+                "ai_dependency": {},
+                "ai_summary": {}
             }
 
             # 4. Invoke Workflow Asynchronously
