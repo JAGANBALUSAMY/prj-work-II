@@ -25,6 +25,34 @@ class RepositoryUpdate(BaseModel):
     dependencies_profile: Optional[dict] = None
     environment_profile: Optional[dict] = None
     documentation_profile: Optional[dict] = None
+    build_result: Optional[dict] = None
+    failure_diagnosis: Optional[dict] = None
+
+class BuildValidationResult(BaseModel):
+    build_attempted: bool
+    build_success: bool
+    detected_ecosystem: str
+    commands_executed: List[str]
+    execution_time: float
+    logs: str
+    errors: Optional[str] = None
+    container_logs: Optional[str] = None
+    container_exit_code: Optional[int] = None
+    container_execution_time: Optional[float] = None
+    validation_category: Optional[str] = None
+
+class AIRecommendationSchema(BaseModel):
+    root_cause_explanation: str
+    fix_steps: List[str]
+    commands_to_execute: List[str]
+    confidence_level: float
+
+class FailureDiagnosisResponse(BaseModel):
+    root_cause: str
+    category: str
+    confidence: float
+    recommendations: List[str]
+    ai_recommendation: Optional[AIRecommendationSchema] = None
 
 class RepositoryInDBBase(RepositoryBase):
     id: UUID
@@ -42,9 +70,21 @@ class RepositoryInDBBase(RepositoryBase):
     dependencies_profile: Optional[dict] = None
     environment_profile: Optional[dict] = None
     documentation_profile: Optional[dict] = None
+    build_result: Optional[dict] = None
+    failure_diagnosis: Optional[dict] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
 class RepositoryResponse(RepositoryInDBBase):
     analyses: List[AnalysisResponse] = []
+
+class SimilarFailureResponse(BaseModel):
+    repository_id: str
+    repository_name: str
+    ecosystem: str
+    category: str
+    root_cause: str
+    recommendations: List[str]
+    logs: str
+    similarity_score: float

@@ -44,3 +44,11 @@ export const deleteAllRepositories = async () => {
   const response = await api.delete('/repositories')
   return response.data
 }
+
+export const downloadRepositoryReport = async (id) => {
+  const response = await api.get(`/repositories/${id}/report`, {
+    responseType: 'blob'
+  })
+  return response
+}
+

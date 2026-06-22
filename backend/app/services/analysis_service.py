@@ -45,7 +45,10 @@ class AnalysisService:
                 "logs": ["State machine initialized."],
                 "ai_documentation": {},
                 "ai_dependency": {},
-                "ai_summary": {}
+                "ai_summary": {},
+                "build_result": {},
+                "failure_diagnosis": {},
+                "ai_recommendation": {}
             }
 
             # 4. Invoke Workflow Asynchronously

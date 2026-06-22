@@ -188,7 +188,7 @@ class RepoService:
                 ["git", "clone", "--depth=1", clone_url, local_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
+                encoding="utf-8",
                 errors="replace",
                 timeout=CLONE_TIMEOUT_SECONDS
             )

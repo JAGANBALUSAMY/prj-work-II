@@ -3,69 +3,69 @@
 @tailwind utilities;
 
 :root {
-  /* Dark Theme Variable Tokens (Default) */
-  --color-bg-base: #060913;
-  --color-bg-surface: #0b1021;
-  --color-bg-panel: #12182c;
-  --color-bg-input: #04060d;
+  /* Bespoke Obsidian & Copper/Gold Theme Variable Tokens (Default Dark) */
+  --color-bg-base: #0a0a0c;
+  --color-bg-surface: #121316;
+  --color-bg-panel: #1b1c20;
+  --color-bg-input: #060608;
 
-  --color-text-primary: #f8fafc;
-  --color-text-secondary: #cbd5e1;
-  --color-text-tertiary: #94a3b8;
-  --color-text-muted: #64748b;
+  --color-text-primary: #f1f2f4;
+  --color-text-secondary: #9fa2ad;
+  --color-text-tertiary: #7c7f8c;
+  --color-text-muted: #52555f;
 
-  --color-border-subtle: rgba(255, 255, 255, 0.05);
-  --color-border-glow: rgba(99, 102, 241, 0.15);
+  --color-border-subtle: #1e2026;
+  --color-border-glow: #c5a880;
 
-  --color-brand-indigo: #6366f1;
-  --color-brand-purple: #a855f7;
-  --color-brand-cyan: #22d3ee;
-  --color-brand-pink: #ec4899;
+  --color-brand-indigo: #c5a880; /* Gold */
+  --color-brand-purple: #a5855a; /* Deep Gold */
+  --color-brand-cyan: #7fa7c3; /* Steel Blue */
+  --color-brand-pink: #c37f8e; /* Muted Rose */
 
-  --color-status-success: #10b981;
-  --color-status-success-bg: rgba(16, 185, 129, 0.08);
-  --color-status-warning: #f59e0b;
-  --color-status-warning-bg: rgba(245, 158, 11, 0.08);
-  --color-status-error: #ef4444;
-  --color-status-error-bg: rgba(239, 68, 68, 0.08);
-  --color-status-info: #3b82f6;
-  --color-status-info-bg: rgba(59, 130, 246, 0.08);
+  --color-status-success: #5ead72; /* Jade */
+  --color-status-success-bg: rgba(94, 173, 114, 0.08);
+  --color-status-warning: #e39b42; /* Ochre */
+  --color-status-warning-bg: rgba(227, 155, 66, 0.08);
+  --color-status-error: #cf5555; /* Crimson */
+  --color-status-error-bg: rgba(207, 85, 85, 0.08);
+  --color-status-info: #5282b2;
+  --color-status-info-bg: rgba(82, 130, 178, 0.08);
 
-  --shadow-glass-color: rgba(0, 0, 0, 0.45);
-  --shadow-glow-color: rgba(99, 102, 241, 0.12);
+  --shadow-glass-color: rgba(0, 0, 0, 0.35);
+  --shadow-glow-color: rgba(197, 168, 128, 0.04);
 }
 
 .light {
-  /* Light Theme Variable Tokens */
-  --color-bg-base: #f8fafc;
+  /* Bespoke Paper & Bronze Theme Variable Tokens */
+  --color-bg-base: #f9fafb;
   --color-bg-surface: #ffffff;
-  --color-bg-panel: #f1f5f9;
-  --color-bg-input: #f8fafc;
+  --color-bg-panel: #f3f4f6;
+  --color-bg-input: #f9fafb;
 
-  --color-text-primary: #0f172a;
-  --color-text-secondary: #334155;
-  --color-text-tertiary: #475569;
-  --color-text-muted: #94a3b8;
+  --color-text-primary: #111827;
+  --color-text-secondary: #4b5563;
+  --color-text-tertiary: #6b7280;
+  --color-text-muted: #9ca3af;
 
-  --color-border-subtle: rgba(15, 23, 42, 0.08);
-  --color-border-glow: rgba(99, 102, 241, 0.12);
+  --color-border-subtle: #e5e7eb;
+  --color-border-glow: #c5a880;
 
-  --color-brand-indigo: #4f46e5;
-  --color-brand-purple: #9333ea;
-  --color-brand-cyan: #0891b2;
-  --color-brand-pink: #db2777;
+  --color-brand-indigo: #9f7f55;
+  --color-brand-purple: #805a32;
+  --color-brand-cyan: #4e7896;
+  --color-brand-pink: #964e5b;
 
-  --color-status-success: #059669;
-  --color-status-success-bg: rgba(5, 150, 105, 0.06);
-  --color-status-warning: #d97706;
-  --color-status-warning-bg: rgba(217, 119, 6, 0.06);
-  --color-status-error: #dc2626;
-  --color-status-error-bg: rgba(220, 38, 38, 0.06);
-  --color-status-info: #2563eb;
-  --color-status-info-bg: rgba(37, 99, 235, 0.06);
+  --color-status-success: #1d7a41;
+  --color-status-success-bg: rgba(29, 122, 65, 0.06);
+  --color-status-warning: #b56f1e;
+  --color-status-warning-bg: rgba(181, 111, 30, 0.06);
+  --color-status-error: #b33939;
+  --color-status-error-bg: rgba(179, 57, 57, 0.06);
+  --color-status-info: #2c5e8a;
+  --color-status-info-bg: rgba(44, 94, 138, 0.06);
 
-  --shadow-glass-color: rgba(15, 23, 42, 0.04);
-  --shadow-glow-color: rgba(99, 102, 241, 0.05);
+  --shadow-glass-color: rgba(17, 24, 39, 0.04);
+  --shadow-glow-color: rgba(197, 168, 128, 0.02);
 }
 
 @layer base {
@@ -75,11 +75,6 @@
     font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
     min-height: 100vh;
     transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    background-image: 
-      radial-gradient(at 0% 0%, var(--shadow-glow-color) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(168, 85, 247, 0.03) 0px, transparent 50%),
-      radial-gradient(rgba(255, 255, 255, 0.003) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 24px 24px;
   }
 }
 
@@ -215,4 +210,65 @@
 .scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Three Pane Layout Helpers */
+.layout-container {
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+}
+
+.sidebar-container {
+  width: 260px;
+  background-color: var(--color-bg-surface);
+  border-right: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex-shrink: 0;
+  z-index: 40;
+  transition: transform 0.3s ease;
+}
+
+/* Status Health Badges */
+.badge-elite {
+  color: var(--color-status-success);
+  background-color: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+.badge-healthy {
+  color: var(--color-brand-cyan);
+  background-color: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+}
+
+.badge-atrisk {
+  color: var(--color-status-warning);
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.badge-dormant {
+  color: var(--color-text-muted);
+  background-color: rgba(100, 116, 139, 0.1);
+  border: 1px solid rgba(100, 116, 139, 0.25);
+}
+
+.badge-abandoned {
+  color: var(--color-status-error);
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+}
+
+/* Animation track dials */
+@keyframes progress-spinner {
+  from { stroke-dashoffset: 250; }
+}
+
+.animate-gauge {
+  animation: progress-spinner 1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }

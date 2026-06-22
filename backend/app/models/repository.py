@@ -25,6 +25,8 @@ class Repository(Base):
     dependencies_profile: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     environment_profile: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     documentation_profile: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    build_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    failure_diagnosis: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationship to analyses

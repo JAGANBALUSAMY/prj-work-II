@@ -1,0 +1,53 @@
+Processing /workspace
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting starlette>=0.46.0 (from fastapi==0.137.2)
+  Downloading starlette-1.3.1-py3-none-any.whl.metadata (6.4 kB)
+Collecting pydantic>=2.9.0 (from fastapi==0.137.2)
+  Downloading pydantic-2.13.4-py3-none-any.whl.metadata (109 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 109.4/109.4 kB 966.9 kB/s eta 0:00:00
+Collecting typing-extensions>=4.8.0 (from fastapi==0.137.2)
+  Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting typing-inspection>=0.4.2 (from fastapi==0.137.2)
+  Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+Collecting annotated-doc>=0.0.2 (from fastapi==0.137.2)
+  Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+Collecting annotated-types>=0.6.0 (from pydantic>=2.9.0->fastapi==0.137.2)
+  Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+Collecting pydantic-core==2.46.4 (from pydantic>=2.9.0->fastapi==0.137.2)
+  Downloading pydantic_core-2.46.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+Collecting anyio<5,>=3.6.2 (from starlette>=0.46.0->fastapi==0.137.2)
+  Downloading anyio-4.14.0-py3-none-any.whl.metadata (4.6 kB)
+Collecting idna>=2.8 (from anyio<5,>=3.6.2->starlette>=0.46.0->fastapi==0.137.2)
+  Downloading idna-3.18-py3-none-any.whl.metadata (6.1 kB)
+Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Downloading pydantic-2.13.4-py3-none-any.whl (472 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 472.3/472.3 kB 566.9 kB/s eta 0:00:00
+Downloading pydantic_core-2.46.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 348.2 kB/s eta 0:00:00
+Downloading starlette-1.3.1-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.6/73.6 kB 397.3 kB/s eta 0:00:00
+Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 514.3 kB/s eta 0:00:00
+Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+Downloading anyio-4.14.0-py3-none-any.whl (123 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 123.5/123.5 kB 457.2 kB/s eta 0:00:00
+Downloading idna-3.18-py3-none-any.whl (65 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 65.5/65.5 kB 571.4 kB/s eta 0:00:00
+Building wheels for collected packages: fastapi
+  Building wheel for fastapi (pyproject.toml): started
+  Building wheel for fastapi (pyproject.toml): finished with status 'done'
+  Created wheel for fastapi: filename=fastapi-0.137.2-py3-none-any.whl size=123241 sha256=64ce1a4797c5da14b3da4073b54c0306d5ea7131d8d874c18371026b2e135802
+  Stored in directory: /tmp/pip-ephem-wheel-cache-804plvpf/wheels/e2/2c/68/4c4a53c0aec7bc75cfaa7bb42a2542d1390caa1e3199ccef70
+Successfully built fastapi
+Installing collected packages: typing-extensions, idna, annotated-types, annotated-doc, typing-inspection, pydantic-core, anyio, starlette, pydantic, fastapi
+Successfully installed annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.14.0 fastapi-0.137.2 idna-3.18 pydantic-2.13.4 pydantic-core-2.46.4 starlette-1.3.1 typing-extensions-4.15.0 typing-inspection-0.4.2
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+
+[notice] A new release of pip is available: 24.0 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip

@@ -84,7 +84,7 @@ export default function AnalysisPanel({
               const status = repo.status
               const hasLog = (pattern) => logs.some(l => l.includes(pattern))
               
-              let step1 = 'pending', step2 = 'pending', step3 = 'pending', step4 = 'pending', step5 = 'pending', step6 = 'pending'
+              let step1 = 'pending', step2 = 'pending', step3 = 'pending', step4 = 'pending', step5 = 'pending', step6 = 'pending', step7 = 'pending', step8 = 'pending', step9 = 'pending', step10 = 'pending', step11 = 'pending'
               if (status === 'cloning') step1 = 'active'
               if (status === 'cloned' || hasLog('Node [technology_discovery]')) step1 = 'completed'
               if (hasLog('Node [technology_discovery]')) step2 = 'active'
@@ -94,9 +94,19 @@ export default function AnalysisPanel({
               if (hasLog('Node [environment_reconstruction]')) step4 = 'active'
               if (hasLog('Node [documentation_analysis]')) step4 = 'completed'
               if (hasLog('Node [documentation_analysis]')) step5 = 'active'
-              if (hasLog('Node [store_results]')) step5 = 'completed'
-              if (hasLog('Node [store_results]')) step6 = 'active'
-              if (repo.analyses && repo.analyses[0] && repo.analyses[0].status === 'completed') step6 = 'completed'
+              if (hasLog('Node [ai_documentation]')) step5 = 'completed'
+              if (hasLog('Node [ai_documentation]')) step6 = 'active'
+              if (hasLog('Node [ai_dependency]')) step6 = 'completed'
+              if (hasLog('Node [ai_dependency]')) step7 = 'active'
+              if (hasLog('Node [ai_repository_summary]')) step7 = 'completed'
+              if (hasLog('Node [ai_repository_summary]')) step8 = 'active'
+              if (hasLog('Node [build_validation]')) step8 = 'completed'
+              if (hasLog('Node [build_validation]')) step9 = 'active'
+              if (hasLog('Node [ai_recommendation]')) step9 = 'completed'
+              if (hasLog('Node [ai_recommendation]')) step10 = 'active'
+              if (hasLog('Node [store_results]')) step10 = 'completed'
+              if (hasLog('Node [store_results]')) step11 = 'active'
+              if (repo.analyses && repo.analyses[0] && repo.analyses[0].status === 'completed') step11 = 'completed'
 
               return (
                 <div key={repo.id} className="glass-panel p-6 rounded-2xl border border-border-subtle space-y-6 bg-gradient-to-br from-bg-surface to-transparent animate-fadeIn">
@@ -124,7 +134,12 @@ export default function AnalysisPanel({
                           { label: "03. Dependency Audit", state: step3, desc: "Analyzing duplicates and security warnings" },
                           { label: "04. Env Reconstruction", state: step4, desc: "Resolving reference vars to .env templates" },
                           { label: "05. Doc Grading", state: step5, desc: "Checking documentation completeness criteria" },
-                          { label: "06. Indexing & Save", state: step6, desc: "Saving data and indexing vectors to ChromaDB" }
+                          { label: "06. AI Doc Analysis", state: step6, desc: "Auditing documentation structure" },
+                          { label: "07. AI Dependency Audit", state: step7, desc: "Identifying package security risks" },
+                          { label: "08. AI Summary", state: step8, desc: "Generating codebase architecture summaries" },
+                          { label: "09. Build Validation", state: step9, desc: "Isolated container compilation check" },
+                          { label: "10. AI Recommendation", state: step10, desc: "Diagnosing failures and generating fixes" },
+                          { label: "11. Indexing & Save", state: step11, desc: "Saving data and indexing vectors to ChromaDB" }
                         ].map((step, idx) => {
                           const isCompleted = step.state === 'completed'
                           const isActive = step.state === 'active'

@@ -3,13 +3,27 @@ import {
   Clock, Trash2, Github, Star, GitFork, AlertCircle, 
   CheckCircle, ShieldAlert, Users, Calendar, ExternalLink, 
   Database, Code, Terminal, BookOpen, Layers, HeartHandshake,
-  ChevronRight, ArrowRight, Sparkles, Brain, Check, XCircle
+  ChevronRight, ArrowRight, Sparkles, Brain, Check, XCircle,
+  Hammer, Wrench, Download, Zap, Cpu, BarChart2, TrendingDown,
+  MapPin, Activity, ListChecks
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
 import { Input } from '../ui/Input'
 import { CircularProgress } from '../ui/CircularProgress'
 import { Tooltip } from '../ui/Tooltip'
+// Intelligence Center Components
+import ExecutiveIntelligencePanel from '../intelligence/ExecutiveIntelligencePanel'
+import ArchitecturePanel from '../intelligence/ArchitecturePanel'
+import MaturityPanel from '../intelligence/MaturityPanel'
+import DependencyIntelligencePanel from '../intelligence/DependencyIntelligencePanel'
+import BuildReproducibilityPanel from '../intelligence/BuildReproducibilityPanel'
+import AIReasoningPanel from '../intelligence/AIReasoningPanel'
+import RiskForecastPanel from '../intelligence/RiskForecastPanel'
+import ActionPlanPanel from '../intelligence/ActionPlanPanel'
+import ExecutionGuidePanel from '../intelligence/ExecutionGuidePanel'
+import VisualizationsPanel from '../intelligence/VisualizationsPanel'
+import EnvironmentIntelligencePanel from '../intelligence/EnvironmentIntelligencePanel'
 
 export default function HistoryPanel({
   repos = [],
@@ -17,6 +31,8 @@ export default function HistoryPanel({
   onSelectRepo,
   onDeleteRepo,
   onDeleteAll,
+  onDownloadReport,
+  onReanalyze,
   activeTab,
   onActiveTabChange,
   formatDate,
@@ -832,7 +848,7 @@ export default function HistoryPanel({
   const renderSurvivabilityTab = (repo) => {
     if (!repo.analyses || repo.analyses.length === 0) {
       return (
-        <div className="p-8 text-center text-text-muted text-xs italic bg-bg-panel/20 border border-border-subtle rounded-xl font-light">
+        <div className="p-8 text-center text-text-muted text-xs italic bg-bg-panel/20 border border-border-subtle rounded-xl font-light animate-fadeIn">
           No survivability data recorded.
         </div>
       )
@@ -841,7 +857,178 @@ export default function HistoryPanel({
     const analysis = repo.analyses[0]
     const findings = analysis.findings || {}
     const factors = findings.survivability_factors || {}
+    const details = findings.survivability_details || null
+    const prediction = findings.health_prediction || null
 
+    const getCategoryBadgeClass = (category) => {
+      const c = (category || '').toLowerCase()
+      if (c === 'healthy') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+      if (c === 'moderate') return 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+      if (c === 'at risk') return 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+      return 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+    }
+
+    const getPredictiveBadgeClass = (health) => {
+      const h = (health || '').toLowerCase()
+      if (h === 'healthy') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+      if (h === 'at risk') return 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+      if (h === 'dormant') return 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+      return 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+    }
+
+    const getBarColor = (score) => {
+      if (score >= 80) return 'bg-emerald-400'
+      if (score >= 60) return 'bg-amber-400'
+      if (score >= 30) return 'bg-orange-400'
+      return 'bg-rose-400'
+    }
+
+    if (details) {
+      const metrics = details.metrics || {}
+      const rawStats = details.raw_stats || {}
+      const riskFactors = details.risk_factors || []
+      const days_ago = rawStats.last_commit_days_ago || 0
+      
+      const subMetrics = [
+        { name: 'Commit Frequency', score: metrics.commit_frequency_score || 0, desc: `${rawStats.commit_count_1y || 0} commits in the last year` },
+        { name: 'Release Frequency', score: metrics.release_frequency_score || 0, desc: `${rawStats.tags_count || 0} release tags found` },
+        { name: 'Dependency Freshness', score: metrics.dependency_freshness_score || 0, desc: 'Constraint pinning and repository age' },
+        { name: 'Contributor Activity', score: metrics.contributor_activity_score || 0, desc: `${rawStats.active_contributors_90d || 0} active, ${rawStats.total_contributors || 0} total contributors` },
+        { name: 'Issue Resolution Rate', score: metrics.issue_resolution_score || 0, desc: `${rawStats.open_issues || 0} open issues` },
+        { name: 'Security Risk Indicators', score: metrics.security_risks_score || 0, desc: 'Duplicate, unpinned, and suspicious packages' }
+      ]
+
+      return (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Header Cards Grid (Survivability + AI Prediction) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Core Survivability Card */}
+            <div className="p-6 rounded-2xl border border-border-subtle bg-bg-panel/25 flex flex-col sm:flex-row items-center justify-around gap-6">
+              <div className="shrink-0 flex justify-center">
+                <CircularProgress 
+                  score={analysis.survivability_score || 0} 
+                  label="Survivability Score" 
+                  size={100} 
+                />
+              </div>
+              
+              <div className="space-y-3 text-center sm:text-left flex-1">
+                <div>
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block font-mono">Health Classification</span>
+                  <span className={`inline-block px-3 py-1 rounded-xl text-[11px] font-black border uppercase tracking-wider mt-1.5 ${getCategoryBadgeClass(details.health_category)}`}>
+                    {details.health_category}
+                  </span>
+                </div>
+                <p className="text-xs text-text-secondary font-light leading-relaxed">
+                  The survivability index measures long-term project viability, maintenance speed, community activity, and architectural security resilience.
+                </p>
+              </div>
+            </div>
+
+            {/* Health Prediction Outcome Card */}
+            {prediction ? (
+              <div className="p-6 rounded-2xl border border-border-subtle bg-bg-panel/25 flex flex-col justify-between space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <Brain className="w-5 h-5 text-brand-purple" />
+                    <span className="text-xs font-extrabold text-text-primary uppercase tracking-wide">AI Health Prediction</span>
+                  </div>
+                  <span className={`px-3 py-1 rounded-xl text-[11px] font-black border uppercase tracking-wider ${getPredictiveBadgeClass(prediction.predicted_health)}`}>
+                    {prediction.predicted_health}
+                  </span>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-[10px] text-text-muted font-mono">
+                    <span>Model Confidence</span>
+                    <span>{Math.round(prediction.confidence * 100)}%</span>
+                  </div>
+                  <div className="w-full bg-bg-panel/60 h-1.5 rounded-full overflow-hidden border border-border-subtle">
+                    <div 
+                      className="h-full rounded-full bg-brand-purple" 
+                      style={{ width: `${prediction.confidence * 100}%` }}
+                    />
+                  </div>
+                </div>
+
+                <p className="text-xs text-text-secondary leading-relaxed font-light select-text">
+                  {prediction.reasoning}
+                </p>
+              </div>
+            ) : (
+              <div className="p-6 rounded-2xl border border-border-subtle bg-bg-panel/20 flex flex-col justify-center items-center text-center italic text-text-muted text-xs font-light">
+                <Brain className="w-8 h-8 text-text-muted/30 mb-2 animate-pulse" />
+                Predictive health model output not generated. Run analysis to trigger classification.
+              </div>
+            )}
+          </div>
+
+          {/* Risk Factors Section if any exist */}
+          {riskFactors.length > 0 && (
+            <Card className="p-5 border border-status-error/10 bg-status-error-bg/5 space-y-3">
+              <span className="text-[10px] text-status-error font-extrabold uppercase tracking-widest flex items-center gap-1.5 font-mono">
+                <ShieldAlert className="w-4 h-4" /> Detected Risk Factors ({riskFactors.length})
+              </span>
+              <ul className="space-y-2">
+                {riskFactors.map((rf, i) => (
+                  <li key={i} className="text-xs text-text-secondary flex items-start gap-2 font-light">
+                    <span className="w-1.5 h-1.5 rounded-full bg-status-error mt-1.5 shrink-0"></span>
+                    <span>{rf}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          {/* 6 Upgraded Sub-Metrics grid */}
+          <div>
+            <h3 className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-3">Survivability Dimensions Breakdown</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {subMetrics.map((sm, i) => (
+                <div key={i} className="p-4 rounded-xl bg-bg-panel/30 border border-border-subtle space-y-2.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-text-primary">{sm.name}</span>
+                    <span className="font-bold font-mono text-text-secondary">{sm.score}%</span>
+                  </div>
+                  <div className="w-full bg-bg-panel/60 h-1.5 rounded-full overflow-hidden border border-border-subtle">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${getBarColor(sm.score)}`} 
+                      style={{ width: `${sm.score}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-text-muted font-light leading-relaxed block">{sm.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Raw Stats Grid */}
+          <div>
+            <h3 className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-3">Repository Activity Statistics</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {[
+                { label: 'Days Since Last Commit', val: rawStats.last_commit_days_ago, desc: days_ago === 0 ? 'Committed today' : days_ago === 1 ? '1 day ago' : `${days_ago} days ago` },
+                { label: 'Commits (Last Year)', val: rawStats.commit_count_1y, desc: 'Maintenance intensity' },
+                { label: 'Release Tags Count', val: rawStats.tags_count, desc: 'Versioning frequency' },
+                { label: 'Total Contributors', val: rawStats.total_contributors, desc: 'Project community size' },
+                { label: 'Active Contributors (90d)', val: rawStats.active_contributors_90d, desc: 'Recent collaboration' },
+                { label: 'Open Issues Count', val: rawStats.open_issues, desc: 'Unresolved backlog' }
+              ].map((stat, i) => (
+                <div key={i} className="p-4 rounded-xl bg-bg-input/60 border border-border-subtle flex flex-col justify-between min-h-[72px]">
+                  <span className="text-[9px] text-text-muted font-bold uppercase tracking-wider">{stat.label}</span>
+                  <div className="mt-1 flex items-baseline justify-between gap-2">
+                    <span className="text-base font-extrabold text-text-primary">{stat.val}</span>
+                    <span className="text-[9px] text-text-muted font-light truncate max-w-[100px]">{stat.desc}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // Legacy Fallback (older reports without survivability_details)
     return (
       <div className="space-y-6 animate-fadeIn">
         <div className="flex justify-center py-2">
@@ -882,6 +1069,201 @@ export default function HistoryPanel({
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const renderBuildValidationTab = (repo) => {
+    const buildResult = repo.build_result || null
+    const diagnosis = repo.failure_diagnosis || null
+    const aiRecommendation = diagnosis?.ai_recommendation || null
+
+    if (!buildResult) {
+      return (
+        <div className="p-8 text-center text-text-muted text-xs italic bg-bg-panel/20 border border-border-subtle rounded-xl font-light animate-fadeIn">
+          No build validation has been executed for this repository yet. Run analysis or trigger build validation first.
+        </div>
+      )
+    }
+
+    const buildSuccess = buildResult.build_success
+    const detectedEcosystem = buildResult.detected_ecosystem || 'Unknown'
+    const commandsExecuted = buildResult.commands_executed || []
+    const execTime = buildResult.execution_time || 0.0
+    const buildLogs = buildResult.logs || ''
+    const containerLogs = buildResult.container_logs || ''
+    
+    return (
+      <div className="space-y-6 animate-fadeIn">
+        {/* Build Status Banner */}
+        <div className={`p-5 rounded-xl border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
+          buildSuccess 
+            ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' 
+            : 'bg-rose-500/5 border-rose-500/20 text-rose-400'
+        }`}>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">Build Validation Status</span>
+            <div className="flex items-center gap-2 mt-1">
+              {buildSuccess ? (
+                <>
+                  <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <span className="text-sm font-extrabold text-text-primary uppercase tracking-wide">Build Succeeded</span>
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                  <span className="text-sm font-extrabold text-text-primary uppercase tracking-wide">Build Failed / Skipped</span>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-text-secondary font-light mt-1">
+              Ecosystem: <code className="font-semibold text-text-primary">{detectedEcosystem}</code> | Execution Time: <span className="font-semibold text-text-primary">{execTime.toFixed(2)}s</span>
+            </p>
+          </div>
+          {commandsExecuted.length > 0 && (
+            <div className="text-xs font-mono bg-bg-panel/40 px-3 py-1.5 rounded-lg border border-border-subtle shrink-0">
+              <span className="text-[9px] text-text-muted font-bold uppercase block mb-1">Commands run</span>
+              {commandsExecuted.map((c, i) => (
+                <div key={i} className="text-text-secondary">&gt; {c}</div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* AI Failure Remediation Recommendation if Build Failed */}
+        {!buildSuccess && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* AI recommendation agent panel */}
+            {aiRecommendation ? (
+              <Card className="p-6 border border-brand-purple/20 bg-gradient-to-br from-brand-purple/5 to-transparent relative overflow-hidden space-y-5">
+                <div className="flex items-center justify-between gap-4 pb-4 border-b border-border-subtle">
+                  <div className="flex items-center gap-2">
+                    <Brain className="w-5 h-5 text-brand-purple" />
+                    <h3 className="text-xs font-extrabold text-text-primary uppercase tracking-wide">AI Fix Recommendation</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] text-text-muted font-bold uppercase">Confidence</span>
+                    <span className="px-2 py-0.5 rounded bg-brand-purple/10 text-brand-purple border border-brand-purple/20 text-[9px] font-black uppercase">
+                      {Math.round(aiRecommendation.confidence_level * 100)}%
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[9px] text-text-muted font-bold uppercase tracking-widest block mb-1">Root Cause Explanation</span>
+                  <p className="text-xs text-text-secondary leading-relaxed font-light">
+                    {aiRecommendation.root_cause_explanation}
+                  </p>
+                </div>
+
+                {aiRecommendation.fix_steps?.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[9px] text-text-muted font-bold uppercase tracking-widest block">Remediation Steps</span>
+                    <ul className="space-y-1.5">
+                      {aiRecommendation.fix_steps.map((step, i) => (
+                        <li key={i} className="text-xs text-text-secondary flex items-start gap-2.5 font-light">
+                          <span className="w-4 h-4 rounded-full bg-brand-purple/10 text-brand-purple text-[10px] flex items-center justify-center shrink-0 mt-0.5 font-black">{i + 1}</span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {aiRecommendation.commands_to_execute?.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[9px] text-text-muted font-bold uppercase tracking-widest block">Fix Commands To Run</span>
+                    <div className="p-3 bg-bg-input rounded-xl border border-border-subtle font-mono text-xs text-brand-purple flex justify-between items-center group relative select-all">
+                      <div className="truncate">
+                        {aiRecommendation.commands_to_execute.map((c, i) => (
+                          <div key={i}>$ {c}</div>
+                        ))}
+                      </div>
+                      <button 
+                        onClick={() => {
+                          navigator.clipboard.writeText(aiRecommendation.commands_to_execute.join('\n'))
+                        }}
+                        className="p-1 rounded bg-bg-panel/80 hover:bg-bg-panel text-text-muted hover:text-text-primary text-[10px] font-semibold transition"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            ) : (
+              <Card className="p-6 border border-border-subtle bg-bg-panel/20 flex flex-col justify-center items-center text-center italic text-text-muted text-xs font-light">
+                <Brain className="w-8 h-8 text-text-muted/30 mb-2" />
+                No AI recommendation generated. Wait for analysis workflow to finish.
+              </Card>
+            )}
+
+            {/* Rule-Based Scanner Diagnosis */}
+            {diagnosis ? (
+              <Card className="p-6 border border-border-subtle bg-bg-panel/20 space-y-5">
+                <div className="flex items-center justify-between gap-4 pb-4 border-b border-border-subtle">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="w-4.5 h-4.5 text-brand-indigo" />
+                    <h3 className="text-xs font-extrabold text-text-primary uppercase tracking-wide">Scanner Diagnosis</h3>
+                  </div>
+                  <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[9px] font-bold uppercase tracking-wider">
+                    {diagnosis.category}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[9px] text-text-muted font-bold uppercase tracking-widest block mb-1">Detected Root Cause</span>
+                  <div className="p-3 rounded-lg bg-bg-input border border-border-subtle font-mono text-[10px] text-text-secondary whitespace-pre-wrap select-all">
+                    {diagnosis.root_cause}
+                  </div>
+                </div>
+
+                {diagnosis.recommendations?.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[9px] text-text-muted font-bold uppercase tracking-widest block font-mono">Scanner Suggestions</span>
+                    <ul className="space-y-1.5">
+                      {diagnosis.recommendations.map((rec, i) => (
+                        <li key={i} className="text-xs text-text-secondary flex items-start gap-2 font-light">
+                          <ChevronRight className="w-3.5 h-3.5 text-brand-indigo mt-0.5 shrink-0" />
+                          <span>{rec}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </Card>
+            ) : (
+              <Card className="p-6 border border-border-subtle bg-bg-panel/20 flex flex-col justify-center items-center text-center italic text-text-muted text-xs font-light">
+                No diagnosis findings available.
+              </Card>
+            )}
+          </div>
+        )}
+
+        {/* Build Terminal Logs */}
+        <div className="space-y-3">
+          <h3 className="text-[10px] font-bold text-text-secondary uppercase tracking-widest flex items-center gap-1.5 font-mono">
+            <Terminal className="w-4 h-4 text-brand-cyan" /> 
+            Build Execution Terminal Output
+          </h3>
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[10.5px] text-slate-300 max-h-[350px] overflow-y-auto shadow-inner leading-relaxed select-all scrollbar-thin">
+            {containerLogs ? (
+              <div>
+                <div className="text-slate-500 select-none pb-2"># --- Container Logs ---</div>
+                <div className="whitespace-pre-wrap">{containerLogs}</div>
+              </div>
+            ) : null}
+            {buildLogs ? (
+              <div className={`${containerLogs ? 'mt-4 border-t border-slate-800 pt-4' : ''}`}>
+                <div className="text-slate-500 select-none pb-2"># --- Host/Docker Build Logs ---</div>
+                <div className="whitespace-pre-wrap">{buildLogs}</div>
+              </div>
+            ) : null}
+            {!buildLogs && !containerLogs && (
+              <span className="text-slate-500 italic">No output logged.</span>
+            )}
           </div>
         </div>
       </div>
@@ -942,27 +1324,48 @@ export default function HistoryPanel({
             </div>
           </div>
 
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => onDeleteRepo(repo.id)}
-            icon={Trash2}
-          >
-            Delete Report
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => onReanalyze(repo)}
+              icon={Hammer}
+            >
+              Re-run Scan
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onDownloadReport(repo)}
+              icon={Download}
+            >
+              Download PDF
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => onDeleteRepo(repo.id)}
+              icon={Trash2}
+            >
+              Delete Report
+            </Button>
+          </div>
         </div>
 
-        {/* Sub Tab Navigation */}
-        <div className="flex border-b border-border-subtle bg-transparent overflow-x-auto scrollbar-none gap-2">
+        {/* Intelligence Hub Tab Navigation */}
+        <div className="flex border-b border-border-subtle bg-transparent overflow-x-auto scrollbar-none gap-1">
           {[
-            { id: 'overview', label: 'Overview', icon: Code },
-            { id: 'ai_insights', label: 'AI Insights', icon: Sparkles },
-            { id: 'dependencies', label: 'Dependencies', icon: Database },
-            { id: 'environment', label: 'Environment', icon: Terminal },
-            { id: 'documentation', label: 'Documentation', icon: BookOpen },
-            { id: 'reproducibility', label: 'Reproducibility', icon: Layers },
-            { id: 'survivability', label: 'Survivability', icon: HeartHandshake },
-            { id: 'logs', label: 'Agent Logs', icon: Clock }
+            { id: 'intelligence_hub', label: 'Intelligence Hub',    icon: Zap,            isNew: true },
+            { id: 'documentation',    label: 'Documentation',       icon: BookOpen },
+            { id: 'environment',      label: 'Environment',         icon: Terminal },
+            { id: 'dependencies',     label: 'Dependencies',        icon: Database },
+            { id: 'build_validation', label: 'Build & Repro',       icon: Hammer },
+            { id: 'survivability',    label: 'Survivability',       icon: HeartHandshake },
+            { id: 'ai_reasoning',     label: 'AI Reasoning',        icon: Brain,          isNew: true },
+            { id: 'risk_forecast',    label: 'Risk & Forecast',     icon: TrendingDown,   isNew: true },
+            { id: 'action_plan',      label: 'Action Plan',         icon: ListChecks,     isNew: true },
+            { id: 'visualizations',   label: 'Visualizations',      icon: BarChart2,      isNew: true },
+            { id: 'logs',             label: 'Agent Logs',          icon: Clock }
           ].map(tab => {
             const Icon = tab.icon
             const isTabActive = activeTab === tab.id
@@ -971,29 +1374,66 @@ export default function HistoryPanel({
                 key={tab.id}
                 onClick={() => onActiveTabChange(tab.id)}
                 className={`
-                  flex items-center gap-1.5 py-3 px-4 text-xs font-bold border-b-2 transition -mb-px shrink-0
+                  flex items-center gap-1.5 py-3 px-3 text-xs font-bold border-b-2 transition -mb-px shrink-0 relative
                   ${isTabActive 
-                    ? 'border-brand-indigo text-text-primary font-bold' 
+                    ? 'border-brand-indigo text-text-primary' 
                     : 'border-transparent text-text-muted hover:text-text-secondary'
                   }
                 `}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-3.5 h-3.5" />
                 {tab.label}
+                {tab.isNew && !isTabActive && (
+                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-brand-purple" />
+                )}
               </button>
             )
           })}
         </div>
 
-        {/* Sub Tab Content Panels */}
+        {/* Intelligence Hub Tab Content */}
         <div className="pt-2">
-          {activeTab === 'overview' && renderOverviewTab(repo)}
-          {activeTab === 'ai_insights' && renderAIInsightsTab(repo)}
-          {activeTab === 'dependencies' && renderDependenciesTab(repo)}
-          {activeTab === 'environment' && renderEnvironmentTab(repo)}
+          {/* NEW: Intelligence Hub — Executive overview */}
+          {activeTab === 'intelligence_hub' && (
+            <div className="space-y-8 animate-fadeIn">
+              <ExecutiveIntelligencePanel repo={repo} />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <h3 className="text-[10px] font-bold text-text-secondary uppercase tracking-widest flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-brand-indigo" /> Architecture
+                  </h3>
+                  <ArchitecturePanel repo={repo} />
+                </div>
+                <div className="space-y-3">
+                  <h3 className="text-[10px] font-bold text-text-secondary uppercase tracking-widest flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-brand-purple" /> Maturity
+                  </h3>
+                  <MaturityPanel repo={repo} />
+                </div>
+              </div>
+            </div>
+          )}
+          {/* NEW: AI Reasoning */}
+          {activeTab === 'ai_reasoning' && <AIReasoningPanel repo={repo} />}
+          {/* NEW: Risk Forecast */}
+          {activeTab === 'risk_forecast' && <RiskForecastPanel repo={repo} />}
+          {/* NEW: Action Plan */}
+          {activeTab === 'action_plan' && (
+            <div className="space-y-8">
+              <ExecutionGuidePanel repo={repo} />
+              <ActionPlanPanel repo={repo} />
+            </div>
+          )}
+          {/* Enhanced: Build & Reproducibility */}
+          {activeTab === 'build_validation' && <BuildReproducibilityPanel repo={repo} />}
+          {/* Enhanced: Dependencies */}
+          {activeTab === 'dependencies' && <DependencyIntelligencePanel repo={repo} />}
+          {/* Existing tabs */}
+          {activeTab === 'environment'  && <EnvironmentIntelligencePanel repo={repo} />}
           {activeTab === 'documentation' && renderDocumentationTab(repo)}
-          {activeTab === 'reproducibility' && renderReproducibilityTab(repo)}
           {activeTab === 'survivability' && renderSurvivabilityTab(repo)}
+          {/* NEW: Visualizations */}
+          {activeTab === 'visualizations' && <VisualizationsPanel repo={repo} />}
           {activeTab === 'logs' && renderAgentLogsTab(repo)}
         </div>
       </div>

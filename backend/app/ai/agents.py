@@ -373,3 +373,155 @@ Generate a JSON object with EXACTLY the following keys. Do not include any other
             "strengths": strengths,
             "weaknesses": weaknesses
         }
+
+
+class AIRecommendationAgent:
+    @classmethod
+    async def analyze(
+        cls,
+        diagnosis: Dict[str, Any],
+        similar_failures: List[Dict[str, Any]],
+        repo_meta: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Runs the AI Recommendation Agent.
+        Inputs: Failure Diagnosis, Similar Failures (RAG), Repository Metadata.
+        """
+        logger.info("AI Recommendation Agent: Initiating build failure remediation analysis...")
+        
+        # Format similar failures for the prompt
+        sim_str = ""
+        if similar_failures:
+            for idx, sf in enumerate(similar_failures[:3]):
+                sim_str += f"""
+Similar Failure {idx+1}:
+- Ecosystem: {sf.get('ecosystem')}
+- Category: {sf.get('category')}
+- Root Cause: {sf.get('root_cause')}
+- Fix Recommendations: {json.dumps(sf.get('recommendations'))}
+"""
+        else:
+            sim_str = "No historical similar failures found in the database."
+
+        prompt = f"""You are an AI DevOps and Build Reliability Engineer. Analyze the following build failure diagnosis and historical context to generate a precise remediation plan.
+
+Repository Metadata:
+- Name: {repo_meta.get('name')}
+- Owner: {repo_meta.get('owner')}
+- Ecosystem: {repo_meta.get('detected_ecosystem')}
+
+Current Build Failure Diagnosis:
+- Category: {diagnosis.get('category')}
+- Root Cause: {diagnosis.get('root_cause')}
+- Suggestions: {json.dumps(diagnosis.get('recommendations'))}
+
+Historical Context (Similar Failures):
+{sim_str}
+
+Generate a JSON object with EXACTLY the following keys. Do not include any other text:
+{{
+  "root_cause_explanation": "A clear, developer-friendly explanation of why the build failed and what the logs indicate.",
+  "fix_steps": ["Step 1 to resolve the issue", "Step 2 to resolve...", ...],
+  "commands_to_execute": ["Specific CLI command to run (e.g. npm install, pip install package)", ...],
+  "confidence_level": 0.85
+}}
+"""
+        try:
+            llm = get_llm()
+            response = await llm.ainvoke(prompt)
+            response_text = response.content if hasattr(response, 'content') else str(response)
+            cleaned = clean_json_response(response_text)
+            data = json.loads(cleaned)
+            
+            required_keys = ["root_cause_explanation", "fix_steps", "commands_to_execute", "confidence_level"]
+            if all(k in data for k in required_keys):
+                logger.info("AI Recommendation Agent: Successfully generated recommendations using Ollama.")
+                return data
+            else:
+                logger.warning("AI Recommendation Agent: Ollama JSON response did not match expected schema. Falling back.")
+        except Exception as e:
+            logger.warning(f"AI Recommendation Agent: Ollama invocation failed ({str(e)}). Falling back to templates.")
+            
+        return cls._fallback_analyze(diagnosis, similar_failures, repo_meta)
+
+    @classmethod
+    def _fallback_analyze(
+        cls,
+        diagnosis: Dict[str, Any],
+        similar_failures: List[Dict[str, Any]],
+        repo_meta: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Deterministic fallback analysis when Ollama fails."""
+        category = diagnosis.get("category", "Unknown")
+        root_cause = diagnosis.get("root_cause", "Build failed due to compile or setup error.")
+        recs = diagnosis.get("recommendations", [])
+        
+        # Simple rule-based formatting based on category
+        steps = []
+        commands = []
+        confidence = 0.5
+
+        if category == "Missing Dependency":
+            steps = [
+                f"Verify if the dependency referenced in '{root_cause}' is correctly declared in the manifest file.",
+                "Ensure that the package registry is accessible from the container or host."
+            ]
+            for r in recs:
+                if "pip install" in r or "npm install" in r or "go get" in r or "cargo" in r:
+                    commands.append(r)
+            if not commands:
+                commands = ["pip install -r requirements.txt" if repo_meta.get("detected_ecosystem") == "Python" else "npm install"]
+            confidence = 0.7
+        elif category == "Missing Environment Variable":
+            steps = [
+                "Locate the environment variable referenced in the logs.",
+                "Create a local .env configuration file and populate the missing key."
+            ]
+            commands = ["echo 'KEY=VALUE' >> .env"]
+            confidence = 0.8
+        elif category == "Build Tool Missing":
+            steps = [
+                "Install the missing compiler or packaging utility on the host or container.",
+                "Ensure the required bin directory is added to your environment $PATH."
+            ]
+            commands = ["sudo apt-get update && sudo apt-get install -y <tool>"]
+            confidence = 0.75
+        elif category == "Docker Failure":
+            steps = [
+                "Check if the Docker daemon is running and has sufficient CPU/memory resources.",
+                "Ensure that container volume mount permissions are correct."
+            ]
+            commands = ["docker info", "docker rm -f $(docker ps -a -q)"]
+            confidence = 0.7
+        elif category == "Network Failure":
+            steps = [
+                "Check host DNS settings and verify internet connection.",
+                "Ensure the package registry proxy allows outgoing HTTPS requests."
+            ]
+            commands = ["curl -I https://registry.npmjs.org", "ping -c 3 8.8.8.8"]
+            confidence = 0.8
+        elif category == "Permission Failure":
+            steps = [
+                "Check directory write and read permissions in the workspace.",
+                "Adjust file permissions or run inside a non-root container context with correct permissions."
+            ]
+            commands = ["chmod -R 755 .", "whoami"]
+            confidence = 0.75
+        else:
+            steps = [
+                "Inspect the build logs stdout and stderr to identify the exact error line.",
+                "Verify compatibility between code versions and build tool configurations."
+            ]
+            commands = []
+            confidence = 0.4
+
+        for r in recs:
+            if r not in commands and len(steps) < 5:
+                steps.append(r)
+
+        return {
+            "root_cause_explanation": f"The build failed under category '{category}' with root cause: {root_cause}",
+            "fix_steps": steps,
+            "commands_to_execute": commands,
+            "confidence_level": confidence
+        }
