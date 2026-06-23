@@ -38,6 +38,7 @@ import ExecutionGuidePanel from './components/intelligence/ExecutionGuidePanel'
 import EnvironmentIntelligencePanel from './components/intelligence/EnvironmentIntelligencePanel'
 import DocumentationIntelligencePanel from './components/intelligence/DocumentationIntelligencePanel'
 import SurvivabilityIntelligencePanel from './components/intelligence/SurvivabilityIntelligencePanel'
+import VulnerabilityIntelligencePanel from './components/intelligence/VulnerabilityIntelligencePanel'
 import AgentLogsIntelligencePanel from './components/intelligence/AgentLogsIntelligencePanel'
 import VisualizationsPanel from './components/intelligence/VisualizationsPanel'
 
@@ -387,7 +388,7 @@ function App() {
   if (authView === 'login') {
     return (
       <Login
-        apiBaseUrl={import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'}
+        apiBaseUrl={window.RUNTIME_CONFIG?.VITE_API_URL || import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'}
         onLoginSuccess={(data) => {
           localStorage.setItem('access_token', data.access_token)
           localStorage.setItem('refresh_token', data.refresh_token)
@@ -403,7 +404,7 @@ function App() {
   if (authView === 'register') {
     return (
       <Register
-        apiBaseUrl={import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'}
+        apiBaseUrl={window.RUNTIME_CONFIG?.VITE_API_URL || import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'}
         onRegisterSuccess={() => setAuthView('login')}
         onBackToLogin={() => setAuthView('login')}
       />
@@ -453,6 +454,7 @@ function App() {
     { id: 'documentation', label: 'Documentation', icon: BookOpen },
     { id: 'environment', label: 'Environment Config', icon: Terminal },
     { id: 'dependencies', label: 'Dependencies', icon: Database },
+    { id: 'vulnerability', label: 'Vulnerabilities', icon: ShieldAlert },
     { id: 'build_validation', label: 'Build & Repro', icon: Hammer },
     { id: 'survivability', label: 'Survivability', icon: HeartHandshake },
     { id: 'ai_intelligence', label: 'AI Reasoning', icon: Brain },
@@ -880,6 +882,10 @@ function App() {
 
                 {currentView === 'dependencies' && (
                   <DependencyIntelligencePanel repo={selectedRepo} />
+                )}
+
+                {currentView === 'vulnerability' && (
+                  <VulnerabilityIntelligencePanel repo={selectedRepo} />
                 )}
 
                 {currentView === 'build_validation' && (

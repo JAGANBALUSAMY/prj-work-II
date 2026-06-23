@@ -279,6 +279,68 @@ class ReportService:
         ]))
         story.append(score_table)
         
+        # 1B. Reproducibility Score Breakdown
+        rep_factors = findings.get("reproducibility_factors", {})
+        breakdown = rep_factors.get("breakdown", [])
+        if breakdown:
+            story.append(Spacer(1, 20))
+            story.append(Paragraph("Reproducibility Score Breakdown", styles['section']))
+            
+            breakdown_data = [[
+                cls._cell("Category", styles['body_bold']), 
+                cls._cell("Score", styles['body_bold']), 
+                cls._cell("Explanation", styles['body_bold'])
+            ]]
+            
+            for item in breakdown:
+                breakdown_data.append([
+                    cls._cell(item.get("category", ""), styles['body']),
+                    cls._cell(f"{item.get('score', 0)} / {item.get('max', 0)}", styles['body']),
+                    cls._cell(item.get("reason", ""), styles['body'])
+                ])
+                
+            breakdown_table = Table(breakdown_data, colWidths=[130, 60, 297])
+            breakdown_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F8FAFC')),
+                ('PADDING', (0, 0), (-1, -1), 6),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(breakdown_table)
+            
+        # 1C. Survivability Score Breakdown
+        surv_factors = findings.get("survivability_factors", {})
+        surv_breakdown = surv_factors.get("breakdown", [])
+        if surv_breakdown:
+            story.append(Spacer(1, 20))
+            story.append(Paragraph("Survivability Score Breakdown", styles['section']))
+            
+            confidence = surv_factors.get("confidence_score", 0)
+            story.append(Paragraph(f"<b>Model Confidence:</b> {confidence}%", styles['body']))
+            story.append(Spacer(1, 10))
+            
+            s_breakdown_data = [[
+                cls._cell("Category", styles['body_bold']), 
+                cls._cell("Score", styles['body_bold']), 
+                cls._cell("Explanation", styles['body_bold'])
+            ]]
+            
+            for item in surv_breakdown:
+                s_breakdown_data.append([
+                    cls._cell(item.get("category", ""), styles['body']),
+                    cls._cell(f"{item.get('score', 0)} / {item.get('max', 0)}", styles['body']),
+                    cls._cell(item.get("reason", ""), styles['body'])
+                ])
+                
+            s_breakdown_table = Table(s_breakdown_data, colWidths=[130, 60, 297])
+            s_breakdown_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F8FAFC')),
+                ('PADDING', (0, 0), (-1, -1), 6),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(s_breakdown_table)
+        
         # 2. Architecture Intelligence
         story.append(Spacer(1, 20))
         story.append(Paragraph("2. Architecture Intelligence", styles['section']))
@@ -383,8 +445,15 @@ class ReportService:
         b_succ = build.get("build_success", False)
         status_text = "SUCCESSFUL" if b_succ else "FAILED / SKIPPED"
         
+        val_cat = build.get("validation_category", "UNKNOWN")
         b_data = [
             [cls._cell("Build Status", styles['body_bold']), cls._make_badge(status_text, "success" if b_succ else "failed", styles['body'])],
+            [cls._cell("Validation Category", styles['body_bold']), cls._make_badge(val_cat, "success" if "SUCCESS" in val_cat else "failed", styles['body'])],
+            [cls._cell("Maturity Score", styles['body_bold']), cls._cell(f"{build.get('build_maturity_score') or 0} / 100", styles['body_bold'])],
+            [cls._cell("1. Dependencies", styles['body_bold']), cls._make_badge("PASS" if build.get("dependency_success") else "FAIL/SKIP", "success" if build.get("dependency_success") else "failed", styles['body'])],
+            [cls._cell("2. Compilation", styles['body_bold']), cls._make_badge("PASS" if build.get("compilation_success") else "FAIL/SKIP", "success" if build.get("compilation_success") else "failed", styles['body'])],
+            [cls._cell("3. Testing", styles['body_bold']), cls._make_badge("PASS" if build.get("test_success") else "FAIL/SKIP", "success" if build.get("test_success") else "failed", styles['body'])],
+            [cls._cell("4. Runtime", styles['body_bold']), cls._make_badge("PASS" if build.get("runtime_success") else "FAIL/SKIP", "success" if build.get("runtime_success") else "failed", styles['body'])],
             [cls._cell("Detected Ecosystem", styles['body_bold']), cls._cell(build.get("detected_ecosystem") or "Unknown", styles['body'])],
             [cls._cell("Execution Time", styles['body_bold']), cls._cell(f"{build.get('execution_time') or 0}s", styles['body'])],
         ]
@@ -405,8 +474,39 @@ class ReportService:
 
         story.append(PageBreak())
 
-        # 7. AI Recommendations & Repository Reasoning
-        story.append(Paragraph("7. AI Repository Reasoning", styles['section']))
+        # 7. Vulnerability Intelligence
+        story.append(PageBreak())
+        story.append(Paragraph("7. Vulnerability Intelligence", styles['section']))
+        vuln = repo.vulnerability_profile if isinstance(repo.vulnerability_profile, dict) else {}
+        if not vuln:
+            story.append(Paragraph("No vulnerability data available.", styles['body']))
+        else:
+            v_data = [
+                [cls._cell("Security Score", styles['body_bold']), cls._cell(f"{vuln.get('security_score', 0)} / 100", styles['body_bold'])],
+                [cls._cell("Average CVSS", styles['body_bold']), cls._cell(str(vuln.get('average_cvss', 0.0)), styles['body'])],
+                [cls._cell("Critical Vulns", styles['body_bold']), cls._cell(str(vuln.get('critical', 0)), styles['body'])],
+                [cls._cell("High Vulns", styles['body_bold']), cls._cell(str(vuln.get('high', 0)), styles['body'])],
+                [cls._cell("Total Vulns", styles['body_bold']), cls._cell(str(vuln.get('total_vulnerabilities', 0)), styles['body'])],
+            ]
+            v_table = Table(v_data, colWidths=[180, 307])
+            v_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8FAFC')),
+                ('PADDING', (0, 0), (-1, -1), 6),
+            ]))
+            story.append(v_table)
+            
+            recs = vuln.get("recommendations", [])
+            if recs:
+                story.append(Spacer(1, 10))
+                story.append(Paragraph("Recommendations", styles['subsection']))
+                for rec in recs:
+                    story.append(Paragraph(f"• {rec}", styles['body']))
+
+        story.append(Spacer(1, 20))
+
+        # 8. AI Recommendations & Repository Reasoning
+        story.append(Paragraph("8. AI Repository Reasoning", styles['section']))
         reasoning = intel.get("repository_reasoning") or {}
         
         def render_reasoning_list(title, items):
@@ -420,9 +520,9 @@ class ReportService:
         render_reasoning_list("Risks", reasoning.get("risks") or [])
         render_reasoning_list("Observations", reasoning.get("observations") or [])
 
-        # 8. Future Risk Forecast
+        # 9. Future Risk Forecast
         story.append(Spacer(1, 20))
-        story.append(Paragraph("8. Future Risk Forecast", styles['section']))
+        story.append(Paragraph("9. Future Risk Forecast", styles['section']))
         pred_health = health_pred.get("predicted_health") or "UNKNOWN"
         pred_reason = health_pred.get("reasoning") or ""
         pred_data = [
@@ -437,9 +537,9 @@ class ReportService:
         ]))
         story.append(pred_table)
 
-        # 9. Action Plan
+        # 10. Action Plan
         story.append(Spacer(1, 20))
-        story.append(Paragraph("9. Action Plan", styles['section']))
+        story.append(Paragraph("10. Action Plan", styles['section']))
         readiness = intel.get("deployment_readiness") or {}
         recs = readiness.get("recommendations") or []
         if not isinstance(recs, list):

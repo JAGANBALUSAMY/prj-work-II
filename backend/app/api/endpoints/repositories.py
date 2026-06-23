@@ -27,12 +27,11 @@ async def background_acquire_and_analyze(repo_id: UUID, clone_url: str):
     """
     Background worker that executes the unified LangGraph analysis workflow.
     """
-    async with AsyncSessionLocal() as db:
-        try:
-            logger.info(f"Background task: Running unified LangGraph analysis workflow for {repo_id}...")
-            await analysis_service.run_analysis(db, repo_id)
-        except Exception as e:
-            logger.error(f"Failed background worker task for repo {repo_id}: {str(e)}")
+    try:
+        logger.info(f"Background task: Running unified LangGraph analysis workflow for {repo_id}...")
+        await analysis_service.run_analysis(repo_id)
+    except Exception as e:
+        logger.error(f"Failed background worker task for repo {repo_id}: {str(e)}")
 
 @router.post("/analyze", response_model=RepositoryResponse, status_code=status.HTTP_202_ACCEPTED)
 async def analyze_repository(
@@ -56,14 +55,18 @@ async def analyze_repository(
             detail=str(e)
         )
 
-    # 2. Check if repository is already registered
     existing_repo = await repository_repo.get_by_clone_url(db, clone_url)
     if existing_repo:
-        # If it already exists, reset status to re-trigger analysis
+        if existing_repo.user_id and existing_repo.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This repository is already registered by another user."
+            )
+        # If it already exists and belongs to this user (or no owner), reset status
         repo = await repository_repo.update(
             db, 
             db_obj=existing_repo, 
-            obj_in={"status": "cloning"}
+            obj_in={"status": "cloning", "user_id": current_user.id}
         )
     else:
         # Create a new repository entry
@@ -75,7 +78,8 @@ async def analyze_repository(
             "stars": 0,
             "forks": 0,
             "open_issues": 0,
-            "contributors_count": 0
+            "contributors_count": 0,
+            "user_id": current_user.id
         })
 
     # 3. Add cloning & analysis tasks to FastAPI BackgroundTasks
@@ -91,9 +95,15 @@ async def list_repositories(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Lists all repositories in the database with their current status and metadata.
+    Lists all repositories in the database belonging to the current user.
     """
-    repos = await repository_repo.get_multi(db, skip=skip, limit=limit)
+    # Use standard SQLAlchemy filter for user_id to restrict access
+    from sqlalchemy.future import select
+    from app.models.repository import Repository
+    
+    query = select(Repository).filter(Repository.user_id == current_user.id).offset(skip).limit(limit)
+    result = await db.execute(query)
+    repos = result.scalars().all()
     return repos
 
 @router.get("/{id}", response_model=RepositoryResponse)
@@ -111,6 +121,16 @@ async def get_repository_details(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
         )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
+        )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
+        )
     return repo
 
 @router.get("/{id}/stack")
@@ -127,6 +147,11 @@ async def get_repository_stack(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
+        )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
         )
     
     stack = repo.detected_stack or {
@@ -154,6 +179,11 @@ async def get_repository_dependencies(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
+        )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
         )
     
     profile = repo.dependencies_profile or {
@@ -186,6 +216,11 @@ async def get_repository_environment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
         )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
+        )
     
     profile = repo.environment_profile or {
         "variables": [],
@@ -203,6 +238,8 @@ async def get_repository_environment(
 async def get_repository_documentation(
     id: UUID,
     db: AsyncSession = Depends(get_db)
+,
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Retrieves the documentation intelligence completeness profile for a specific repository.
@@ -212,6 +249,11 @@ async def get_repository_documentation(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
+        )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
         )
     
     profile = repo.documentation_profile or {
@@ -233,6 +275,8 @@ async def get_repository_build_status(
     id: UUID,
     force_rebuild: bool = False,
     db: AsyncSession = Depends(get_db)
+,
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Retrieves the build validation status/result for a specific repository.
@@ -243,6 +287,11 @@ async def get_repository_build_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
+        )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
         )
     
     if repo.build_result and not force_rebuild:
@@ -264,6 +313,8 @@ async def get_repository_build_status(
 async def get_repository_failure_analysis(
     id: UUID,
     db: AsyncSession = Depends(get_db)
+,
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Retrieves the failure diagnosis result for a specific repository.
@@ -275,6 +326,11 @@ async def get_repository_failure_analysis(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
+        )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
         )
     
     # If build hasn't run yet
@@ -320,6 +376,8 @@ async def get_repository_similar_failures(
     id: UUID,
     limit: int = 3,
     db: AsyncSession = Depends(get_db)
+,
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Retrieves the top similar failures from the ChromaDB Failure Knowledge Base
@@ -330,6 +388,11 @@ async def get_repository_similar_failures(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
+        )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
         )
 
     # If build hasn't run yet
@@ -363,6 +426,8 @@ async def get_repository_similar_failures(
 async def get_repository_report(
     id: UUID,
     db: AsyncSession = Depends(get_db)
+,
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Generates and downloads a professional PDF diagnostic report for the repository.
@@ -375,6 +440,11 @@ async def get_repository_report(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
+        )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
         )
         
     try:
@@ -406,6 +476,8 @@ async def get_repository_report(
 async def delete_repository(
     id: UUID,
     db: AsyncSession = Depends(get_db)
+,
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Deletes a specific repository and its associated analyses.
@@ -416,18 +488,30 @@ async def delete_repository(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {id} not found"
         )
+    if repo.user_id and repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this repository"
+        )
     await repository_repo.remove(db, id=id)
     return {"message": f"Repository {id} deleted successfully"}
 
 
 @router.delete("", status_code=status.HTTP_200_OK)
 async def delete_all_repositories(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
-    Deletes all repositories and all associated analyses.
+    Deletes all repositories belonging to the current user.
     """
-    repos = await repository_repo.get_multi(db, limit=10000)
+    from sqlalchemy.future import select
+    from app.models.repository import Repository
+    
+    query = select(Repository).filter(Repository.user_id == current_user.id).limit(10000)
+    result = await db.execute(query)
+    repos = result.scalars().all()
+    
     for r in repos:
         await repository_repo.remove(db, id=r.id)
-    return {"message": "All repositories deleted successfully"}
+    return {"message": "All your repositories deleted successfully"}

@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.services.vector_service import vector_service
 from app.repositories.repo_repo import repository_repo
+from app.models.user import User
+from app.api.endpoints.auth import get_current_active_user
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,8 @@ async def search_repositories(
     q: str = Query(..., description="Query string to search in vectors"),
     type: str = Query("all", description="Type of reports to search: 'metadata', 'dependencies', 'environments', 'documentation', or 'all'"),
     limit: int = Query(5, ge=1, le=50, description="Max results per category"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Search ChromaDB vector collections for matching repository metadata,
@@ -73,6 +76,10 @@ async def search_repositories(
                         repo_uuid = UUID(repo_id)
                         repo_obj = await repository_repo.get(db, repo_uuid)
                         if repo_obj:
+                            # Skip repositories that belong to a different user
+                            if repo_obj.user_id and repo_obj.user_id != current_user.id:
+                                continue
+                                
                             repo_db_info = {
                                 "name": repo_obj.name,
                                 "owner": repo_obj.owner,
@@ -83,6 +90,10 @@ async def search_repositories(
                     except Exception:
                         pass
                 
+                # If there's a repository, but we failed to find it or it was filtered out, skip this item
+                if repo_id and not repo_db_info:
+                    continue
+                    
                 item["repository"] = repo_db_info
                 enriched_results.append(item)
                 

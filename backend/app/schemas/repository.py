@@ -40,6 +40,11 @@ class BuildValidationResult(BaseModel):
     container_exit_code: Optional[int] = None
     container_execution_time: Optional[float] = None
     validation_category: Optional[str] = None
+    dependency_success: Optional[bool] = None
+    compilation_success: Optional[bool] = None
+    test_success: Optional[bool] = None
+    runtime_success: Optional[bool] = None
+    build_maturity_score: Optional[int] = None
 
 class AIRecommendationSchema(BaseModel):
     root_cause_explanation: str

@@ -16,6 +16,10 @@ FROM nginx:alpine
 
 # Copy built files from stage 1
 COPY --from=build /app/dist /usr/share/nginx/html
+# Create entrypoint script for runtime environment variables
+RUN echo '#!/bin/sh' > /docker-entrypoint.d/40-env-config.sh && \
+    echo 'echo "window.RUNTIME_CONFIG = { VITE_API_URL: \"$VITE_API_URL\" };" > /usr/share/nginx/html/config.js' >> /docker-entrypoint.d/40-env-config.sh && \
+    chmod +x /docker-entrypoint.d/40-env-config.sh
 
 # Expose port
 EXPOSE 80

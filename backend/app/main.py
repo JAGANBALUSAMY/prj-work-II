@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.core.database import engine, Base
 from app.api.api import api_router
 # Import models to ensure they are registered on the Base metadata
-from app.models import User, Repository, Analysis
+from app.models import User, Repository, Analysis, BenchmarkRun, BenchmarkResult
 
 # Setup logging configuration
 logging.basicConfig(

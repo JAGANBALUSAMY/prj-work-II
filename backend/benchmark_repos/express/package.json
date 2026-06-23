@@ -1,0 +1,1 @@
+{"name": "express-app", "version": "1.0.0", "dependencies": {"express": "^4.18.2"}, "scripts": {"build": "echo \"express build ok\"", "test": "echo \"express test ok\""}}

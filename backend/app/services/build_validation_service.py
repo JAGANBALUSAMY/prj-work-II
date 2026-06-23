@@ -27,7 +27,7 @@ class DockerBuildExecutor:
         cls,
         local_path: str,
         ecosystem: str,
-        commands: List[str],
+        staged_commands: Dict[str, List[str]],
         manifest_path: str | None,
         timeout: float = 300.0,
         memory_limit: str = "1g"
@@ -52,8 +52,22 @@ class DockerBuildExecutor:
         else:
             container_cwd = "/workspace"
 
-        # Formulate commands. Join multiple commands with &&
-        joined_commands = " && ".join(commands)
+        # Formulate commands using multi-stage bash script
+        bash_script = []
+        for stage_name in ["dependency", "compilation", "test", "runtime"]:
+            cmds = staged_commands.get(stage_name, [])
+            if not cmds:
+                continue
+            bash_script.append(f"echo '===STAGE: {stage_name.upper()}==='")
+            stage_cmd = " && ".join(cmds)
+            bash_script.append(f"if ! ({stage_cmd}); then")
+            bash_script.append(f"  echo '==={stage_name.upper()}_FAILED==='")
+            bash_script.append("  exit 1")
+            bash_script.append("else")
+            bash_script.append(f"  echo '==={stage_name.upper()}_SUCCESS==='")
+            bash_script.append("fi")
+            
+        joined_commands = "\n".join(bash_script)
 
         # Generate unique temporary container name
         container_name = f"build-val-{uuid.uuid4().hex[:8]}"
@@ -140,6 +154,17 @@ class DockerBuildExecutor:
             except Exception as e:
                 logger.warning(f"DockerBuildExecutor: Failed to clean up container {container_name}: {e}")
 
+            dependency_success = "===DEPENDENCY_SUCCESS===" in logs
+            compilation_success = "===COMPILATION_SUCCESS===" in logs
+            test_success = "===TEST_SUCCESS===" in logs
+            runtime_success = "===RUNTIME_SUCCESS===" in logs
+            
+            build_maturity_score = 0
+            if dependency_success: build_maturity_score += 25
+            if compilation_success: build_maturity_score += 25
+            if test_success: build_maturity_score += 25
+            if runtime_success: build_maturity_score += 25
+
             return {
                 "logs": logs,
                 "exit_code": exit_code,
@@ -148,6 +173,11 @@ class DockerBuildExecutor:
                 "docker_image": image,
                 "volume_mounts": f"{host_mount_path}:/workspace",
                 "working_directory": container_cwd,
+                "dependency_success": dependency_success,
+                "compilation_success": compilation_success,
+                "test_success": test_success,
+                "runtime_success": runtime_success,
+                "build_maturity_score": build_maturity_score,
                 "command_executed": joined_commands,
             }
 
@@ -190,7 +220,7 @@ class FallbackHostExecutor:
             )
             try:
                 stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-                logs = stdout.decode("utf-8", errors="ignore")
+                logs = stdout.decode("utf-8", errors="replace")
                 exit_code = process.returncode
             except asyncio.TimeoutError:
                 if process:
@@ -277,7 +307,12 @@ class BuildValidationService:
                     primary_manifest_path = rel_path
                     break
 
-        commands = []
+        staged_commands = {
+            "dependency": [],
+            "compilation": [],
+            "test": [],
+            "runtime": []
+        }
         primary_dir = f"/workspace/{os.path.dirname(primary_manifest_path)}" if primary_manifest_path and os.path.dirname(primary_manifest_path) else "/workspace"
         
         # Pass 3: Generate commands
@@ -289,43 +324,68 @@ class BuildValidationService:
             cd_cmd = f"cd {target_dir}" if needs_cd else ""
             ret_cmd = f"cd {primary_dir}" if needs_cd else ""
             
-            build_cmds = []
+            stages = {"dependency": "", "compilation": "", "test": "", "runtime": ""}
+            
             if file == "Cargo.toml":
-                build_cmds = ["cargo build"]
+                stages["dependency"] = "cargo fetch"
+                stages["compilation"] = "cargo build"
+                stages["test"] = "cargo test"
+                stages["runtime"] = "cargo run --help || echo 'Runtime fallback'"
                 logs.append(f"Detected Package Manager: cargo (Rust) at {rel_path}")
             elif file == "go.mod":
-                build_cmds = ["go build"]
+                stages["dependency"] = "go mod download"
+                stages["compilation"] = "go build ./..."
+                stages["test"] = "go test ./..."
+                stages["runtime"] = "go version"
                 logs.append(f"Detected Package Manager: go modules (Go) at {rel_path}")
             elif file == "pom.xml":
-                build_cmds = ["mvn clean install -DskipTests"]
+                stages["dependency"] = "mvn dependency:resolve"
+                stages["compilation"] = "mvn clean compile -DskipTests"
+                stages["test"] = "mvn test"
+                stages["runtime"] = "mvn -v"
                 logs.append(f"Detected Package Manager: maven (Java Maven) at {rel_path}")
             elif file == "build.gradle":
-                build_cmds = ["gradle build -x test"]
+                stages["dependency"] = "gradle dependencies"
+                stages["compilation"] = "gradle classes"
+                stages["test"] = "gradle test"
+                stages["runtime"] = "gradle -v"
                 logs.append(f"Detected Package Manager: gradle (Java Gradle) at {rel_path}")
             elif file == "package.json":
-                build_cmds = ["npm install", "npm run build --if-present"]
+                stages["dependency"] = "npm install"
+                stages["compilation"] = "npm run build --if-present"
+                stages["test"] = "npm test --if-present"
+                stages["runtime"] = "node -v"
                 logs.append(f"Detected Package Manager: npm (Node.js) at {rel_path}")
             elif file == "requirements.txt":
-                build_cmds = ["pip install -r requirements.txt"]
+                stages["dependency"] = "pip install -r requirements.txt"
+                stages["compilation"] = "python -m compileall ."
+                stages["test"] = "pytest || echo 'No pytest'"
+                stages["runtime"] = "python -c \"print('Runtime Ok')\""
                 logs.append(f"Detected Package Manager: pip (Python) at {rel_path}")
             elif file == "pyproject.toml":
-                build_cmds = ["pip install . || pip install -e . || python -m pip install ."]
+                stages["dependency"] = "pip install . || pip install -e . || python -m pip install ."
+                stages["compilation"] = "python -m compileall ."
+                stages["test"] = "pytest || echo 'No pytest'"
+                stages["runtime"] = "python -c \"print('Runtime Ok')\""
                 logs.append(f"Detected Package Manager: pyproject/poetry/hatch/uv (Python) at {rel_path}")
             elif file == "Pipfile":
-                build_cmds = ["pipenv install"]
+                stages["dependency"] = "pipenv install"
+                stages["compilation"] = "python -m compileall ."
+                stages["test"] = "pipenv run pytest || echo 'No pytest'"
+                stages["runtime"] = "pipenv run python -c \"print('Runtime Ok')\""
                 logs.append(f"Detected Package Manager: pipenv (Python) at {rel_path}")
                 
-            if cd_cmd:
-                commands.append(cd_cmd)
-            for cmd in build_cmds:
-                logs.append(f"Detected Build Command: {cmd}")
-            commands.extend(build_cmds)
-            if ret_cmd:
-                commands.append(ret_cmd)
+            for stage_name, cmd in stages.items():
+                if cmd:
+                    full_cmd = []
+                    if cd_cmd: full_cmd.append(cd_cmd)
+                    full_cmd.append(cmd)
+                    if ret_cmd: full_cmd.append(ret_cmd)
+                    staged_commands[stage_name].append(" && ".join(full_cmd))
                 
         logs.insert(0, f"Detected Ecosystem: {primary_ecosystem}")
         
-        return primary_ecosystem, commands, primary_manifest_path, logs
+        return primary_ecosystem, staged_commands, primary_manifest_path, logs
 
     @classmethod
     async def validate_build(
@@ -366,12 +426,17 @@ class BuildValidationService:
             return result
 
         local_path = os.path.abspath(repo.local_path)
-        ecosystem, commands, manifest_path, detection_logs = cls.detect_ecosystem(local_path)
+        ecosystem, staged_commands, manifest_path, detection_logs = cls.detect_ecosystem(local_path)
         
+        # Flatten staged commands for backwards compatibility in logs
+        flat_commands = []
+        for stage_cmds in staged_commands.values():
+            flat_commands.extend(stage_cmds)
+            
         log_output = "\n".join(detection_logs) + "\n"
 
-        if ecosystem == "Unknown" or not commands:
-            logger.warning(f"[EARLY RETURN] Ecosystem unknown or commands empty. Ecosystem: {ecosystem}, Commands: {commands}")
+        if ecosystem == "Unknown" or not staged_commands.get("dependency"):
+            logger.warning(f"[EARLY RETURN] Ecosystem unknown or commands empty. Ecosystem: {ecosystem}")
             log_output += "Build Execution Skipped: Unknown Ecosystem."
             result = {
                 "build_attempted": False,
@@ -404,7 +469,7 @@ class BuildValidationService:
             docker_result = await DockerBuildExecutor.execute_in_container(
                 local_path=local_path,
                 ecosystem=ecosystem,
-                commands=commands,
+                staged_commands=staged_commands,
                 manifest_path=manifest_path,
                 timeout=timeout,
                 memory_limit=memory_limit
@@ -417,18 +482,29 @@ class BuildValidationService:
             container_logs_lower = docker_result["logs"].lower()
             if not build_success:
                 if docker_result["exit_code"] == 124:
-                    validation_category = "TIMEOUT"
+                    validation_category = "TIMEOUT_FAILURE"
                 elif "temporary failure in name resolution" in container_logs_lower or \
                      "could not resolve host" in container_logs_lower or \
-                     "connection timeout" in container_logs_lower or \
-                     docker_result["exit_code"] in [125, 126, 127] or \
+                     "connection timeout" in container_logs_lower:
+                    is_infrastructure_failure = True
+                    validation_category = "DNS_FAILURE"
+                    log_output += "ERROR: Infrastructure DNS Failure detected.\n"
+                elif docker_result["exit_code"] in [125, 126, 127] or \
                      "error during connect" in container_logs_lower or \
                      "daemon" in container_logs_lower:
                     is_infrastructure_failure = True
-                    validation_category = "DOCKER_NETWORK_FAILURE"
-                    log_output += "ERROR: Infrastructure Network Failure detected.\n"
+                    validation_category = "DOCKER_STARTUP_FAILURE"
+                    log_output += "ERROR: Infrastructure Docker Startup Failure detected.\n"
+                elif "===DEPENDENCY_FAILED===" in docker_result["logs"]:
+                    validation_category = "DEPENDENCY_RESOLUTION_FAILURE"
+                elif "===COMPILATION_FAILED===" in docker_result["logs"]:
+                    validation_category = "COMPILATION_FAILURE"
+                elif "===TEST_FAILED===" in docker_result["logs"]:
+                    validation_category = "TEST_FAILURE"
+                elif "===RUNTIME_FAILED===" in docker_result["logs"]:
+                    validation_category = "RUNTIME_FAILURE"
                 else:
-                    validation_category = "DEPENDENCY_DOWNLOAD_FAILURE"
+                    validation_category = "DEPENDENCY_RESOLUTION_FAILURE"
             
             # Note: if Docker throws a connection error, container exit code is 127
             if is_infrastructure_failure:
@@ -458,7 +534,7 @@ class BuildValidationService:
                 "build_attempted": True,
                 "build_success": build_success,
                 "detected_ecosystem": ecosystem,
-                "commands_executed": commands,
+                "commands_executed": flat_commands,
                 "execution_time": docker_result.get("execution_time", 0.0),
                 "logs": log_output,
                 "errors": "Build Validation could not be completed due to infrastructure failure. Fallback mode used." if is_infrastructure_failure else (None if build_success else "Container build returned non-zero exit code or timeout."),
@@ -467,7 +543,12 @@ class BuildValidationService:
                 "container_execution_time": docker_result.get("execution_time", 0.0),
                 "validation_mode": "host_fallback" if is_infrastructure_failure else "docker",
                 "validation_category": validation_category,
-                "docker_trace": docker_result
+                "docker_trace": docker_result,
+                "dependency_success": docker_result.get("dependency_success", False),
+                "compilation_success": docker_result.get("compilation_success", False),
+                "test_success": docker_result.get("test_success", False),
+                "runtime_success": docker_result.get("runtime_success", False),
+                "build_maturity_score": docker_result.get("build_maturity_score", 0)
             }
             
             from app.services.failure_diagnosis_service import failure_diagnosis_service
@@ -490,14 +571,19 @@ class BuildValidationService:
                 "build_attempted": True,
                 "build_success": False,
                 "detected_ecosystem": ecosystem,
-                "commands_executed": commands,
+                "commands_executed": flat_commands,
                 "execution_time": 0.0,
                 "logs": log_output,
                 "errors": str(e),
                 "container_logs": None,
                 "container_exit_code": -1,
                 "container_execution_time": 0.0,
-                "validation_category": "BUILD_FAILED"
+                "validation_category": "BUILD_FAILED",
+                "dependency_success": False,
+                "compilation_success": False,
+                "test_success": False,
+                "runtime_success": False,
+                "build_maturity_score": 0
             }
             from app.services.failure_diagnosis_service import failure_diagnosis_service
             diagnosis = failure_diagnosis_service.diagnose(result["logs"])

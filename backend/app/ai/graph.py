@@ -16,8 +16,8 @@ from app.services.vector_service import vector_service
 from app.services.build_validation_service import build_validation_service
 from app.services.failure_rag_service import failure_rag_service
 from app.services.health_prediction_service import health_prediction_service
-from app.services.health_prediction_service import health_prediction_service
 from app.services.intelligence_service import intelligence_service
+from app.services.vulnerability_service import vulnerability_service
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,27 @@ async def documentation_analysis_node(state: AnalysisState) -> Dict[str, Any]:
             logs.append(f"Node [documentation_analysis]: Exception occurred: {str(e)}")
             return {"logs": logs}
 
+async def vulnerability_analysis_node(state: AnalysisState) -> Dict[str, Any]:
+    """
+    Node 5.5: Analyzes vulnerabilities using external security scanners (npm audit, pip-audit, etc.)
+    """
+    logs = state.get("logs", [])
+    if state.get("status") != "cloned":
+        logs.append("Node [vulnerability_analysis]: Skipped (Repository not cloned).")
+        return {"logs": logs}
+        
+    logs.append("Node [vulnerability_analysis]: Running vulnerability intelligence scanner...")
+    repo_id = UUID(state["repository_id"])
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            profile = await vulnerability_service.analyze_vulnerabilities(db, repo_id)
+            logs.append(f"Node [vulnerability_analysis]: Scan complete. Score: {profile.get('security_score', 0)}/100, Total Vulns: {profile.get('total_vulnerabilities', 0)}")
+            return {"logs": logs}
+        except Exception as e:
+            logs.append(f"Node [vulnerability_analysis]: Exception occurred: {str(e)}")
+            return {"logs": logs}
+
 def get_git_metrics(local_path: str) -> dict:
     import os
     import subprocess
@@ -307,152 +328,328 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
             # Index metadata in vector DB
             await vector_service.index_repository_metadata(repo)
             
-            # Calculate Reproducibility Score
-            rep_score = 30.0
-            has_docker = False
-            has_readme = False
-            readme_score = 0
+            # --- Redesigned Reproducibility Scoring Logic ---
+            # Maximum Score: 100
             
-            if repo.detected_stack:
+            # 1. Build Validation (Max 30)
+            build_score = 0.0
+            build_reason = "No successful build process detected."
+            if repo.build_result and repo.build_result.get("build_success"):
+                build_score = 30.0
+                build_reason = "Docker container built successfully without errors."
+            elif repo.build_result and "build_maturity_score" in repo.build_result:
+                partial = repo.build_result.get("build_maturity_score", 0) * 0.15 # Max 15 if it fails but has setup
+                build_score = partial
+                build_reason = f"Build failed, but earned partial setup credit ({round(partial, 1)} pts)."
+            elif repo.detected_stack:
                 files = repo.detected_stack.get("scanned_files", [])
                 if "Dockerfile" in files or "docker-compose.yml" in files:
-                    rep_score += 10.0
-                    has_docker = True
-                    
-            if repo.build_result and repo.build_result.get("build_success"):
-                rep_score += 20.0
+                    build_score = 10.0
+                    build_reason = "Build unvalidated, but Docker configuration files are present."
             
-            if repo.documentation_profile:
-                readme_file = repo.documentation_profile.get("scanned_file")
-                if readme_file:
-                    rep_score += 10.0
-                    has_readme = True
-                readme_score = repo.documentation_profile.get("completeness_score", 0)
-                rep_score += (readme_score * 0.3)
+            # 2. Dependency Health (Max 15)
+            dep_score = 0.0
+            dep_reason = "No dependencies detected."
+            if repo.dependencies_profile:
+                deps_list = repo.dependencies_profile.get("dependencies", [])
+                if deps_list:
+                    pinned_ratio = sum(1 for d in deps_list if d.get("version") and d.get("version") not in ("*", "latest", "unspecified")) / len(deps_list)
+                    dep_score = 15.0 * pinned_ratio
+                    dep_reason = f"{round(pinned_ratio*100)}% of {len(deps_list)} dependencies are explicitly pinned."
+                else:
+                    dep_reason = "Dependency parsing failed or no recognizable manifest."
+            
+            # 3. Environment Completeness (Max 15)
+            env_score = 0.0
+            env_reason = "No environment templates or variables detected."
+            if repo.environment_profile:
+                vars_list = repo.environment_profile.get("variables", [])
+                if vars_list:
+                    # Score based on how many have default/example values mapped
+                    has_defaults = sum(1 for v in vars_list if v.get("has_default") or v.get("example_value"))
+                    env_score = min(15.0, 5.0 + (10.0 * (has_defaults / len(vars_list))))
+                    env_reason = f"Detected {len(vars_list)} configuration keys; {has_defaults} have example defaults provided."
+            
+            # 4. Documentation Quality (Max 15)
+            docs_score = 0.0
+            docs_reason = "No documentation found."
+            if repo.documentation_profile and repo.documentation_profile.get("scanned_file"):
+                completeness = repo.documentation_profile.get("completeness_score", 0)
+                docs_score = 15.0 * (completeness / 100.0)
+                docs_reason = f"README completeness evaluated at {completeness}%."
+            
+            # 5. Execution Guide Quality (Max 10)
+            exec_score = 0.0
+            exec_reason = "Execution guide generation incomplete."
+            # Since AI recommendation nodes update 'state', we extract it from there
+            ai_rec = state.get("ai_recommendation", {})
+            if ai_rec:
+                # If we have a recommendation, assume we have enough context to run it
+                exec_score = 10.0
+                exec_reason = "AI-generated execution path and run instructions are fully articulated."
+            elif repo.documentation_profile and repo.documentation_profile.get("scanned_file"):
+                # Fallback to whether docs have install instructions
+                exec_score = 5.0
+                exec_reason = "Partial execution clarity derived from README."
                 
+            # 6. Security Health (Max 15)
+            sec_score = 15.0
+            sec_reason = "No critical vulnerabilities detected."
+            if repo.vulnerability_profile:
+                vulns = repo.vulnerability_profile.get("vulnerabilities", [])
+                if vulns:
+                    high_critical = sum(1 for v in vulns if v.get("severity", "").upper() in ("HIGH", "CRITICAL"))
+                    if high_critical > 0:
+                        sec_score = max(0.0, 15.0 - (high_critical * 5))
+                        sec_reason = f"Penalized due to {high_critical} High/Critical CVEs."
+                    else:
+                        sec_score = 15.0
+                        sec_reason = f"Detected {len(vulns)} minor vulnerabilities, acceptable security health."
+            elif repo.dependencies_profile:
+                report = repo.dependencies_profile.get("report", {})
+                num_susp = len(report.get("suspicious_declarations", []))
+                if num_susp > 0:
+                    sec_score = max(0.0, 15.0 - (num_susp * 5))
+                    sec_reason = f"Penalized due to {num_susp} suspicious/unpinned declarations."
+
+            rep_score = round(build_score + dep_score + env_score + docs_score + exec_score + sec_score, 1)
+            
+            reproducibility_breakdown = [
+                {"category": "Build Validation", "score": round(build_score, 1), "max": 30.0, "reason": build_reason},
+                {"category": "Dependency Health", "score": round(dep_score, 1), "max": 15.0, "reason": dep_reason},
+                {"category": "Environment Completeness", "score": round(env_score, 1), "max": 15.0, "reason": env_reason},
+                {"category": "Documentation Quality", "score": round(docs_score, 1), "max": 15.0, "reason": docs_reason},
+                {"category": "Execution Guide Quality", "score": round(exec_score, 1), "max": 10.0, "reason": exec_reason},
+                {"category": "Security Health", "score": round(sec_score, 1), "max": 15.0, "reason": sec_reason}
+            ]
+            
             # --- Upgraded Survivability Scoring Logic ---
             # 1. Run git metrics scan
             git_metrics = get_git_metrics(repo.local_path)
             days_ago = git_metrics["last_commit_days_ago"]
-            
-            # A. Commit frequency score (out of 100)
-            if days_ago < 30:
-                commit_freq_score = 100
-            elif days_ago < 90:
-                commit_freq_score = 80
-            elif days_ago < 180:
-                commit_freq_score = 60
-            elif days_ago < 365:
-                commit_freq_score = 40
-            else:
-                commit_freq_score = 15
-            # Add volume bonus: up to 100 max
             commit_count = git_metrics["commit_count_1y"]
-            if commit_count > 50:
-                commit_freq_score = min(100, commit_freq_score + 20)
-            elif commit_count > 20:
-                commit_freq_score = min(100, commit_freq_score + 10)
-                
-            # B. Release frequency score (out of 100)
             tags_count = git_metrics["tags_count"]
-            if tags_count >= 10:
-                release_freq_score = 100
-            elif tags_count >= 5:
-                release_freq_score = 85
-            elif tags_count >= 1:
-                release_freq_score = 60
-            else:
-                release_freq_score = 25
-                
-            # C. Dependency freshness score (out of 100)
-            total_deps = 0
-            pinned_deps = 0
-            has_deps = False
-            if repo.dependencies_profile:
-                deps_list = repo.dependencies_profile.get("dependencies", [])
-                if deps_list:
-                    has_deps = True
-                    total_deps = len(deps_list)
-                    pinned_deps = sum(1 for d in deps_list if d.get("version") and d.get("version") not in ("*", "latest", "unspecified"))
-            
-            if has_deps:
-                pin_ratio = pinned_deps / total_deps
-                dep_freshness = pin_ratio * 100
-            else:
-                dep_freshness = 75.0
-                
-            # Apply decay based on inactivity
-            if days_ago < 90:
-                decay = 1.0
-            elif days_ago < 180:
-                decay = 0.8
-            elif days_ago < 365:
-                decay = 0.6
-            else:
-                decay = 0.4
-            dependency_freshness_score = round(dep_freshness * decay, 1)
-
-            # D. Contributor activity score (out of 100)
             total_contribs = git_metrics["total_contributors"]
             active_contribs = git_metrics["active_contributors_90d"]
-            if active_contribs >= 3:
-                contributor_activity_score = 100
-            elif active_contribs >= 1:
-                contributor_activity_score = 80
-            elif total_contribs >= 5:
-                contributor_activity_score = 60
-            elif total_contribs >= 2:
-                contributor_activity_score = 45
-            else:
-                contributor_activity_score = 25
-
-            # E. Issue resolution score (out of 100)
             open_issues = repo.open_issues or 0
             stars = repo.stars or 0
             forks = repo.forks or 0
-            if open_issues == 0:
-                issue_resolution_score = 100
+            
+            surv_breakdown = []
+            
+            # A. Commit Frequency (Max 20.0)
+            cf_score = 0.0
+            cf_reason = ""
+            if days_ago < 30:
+                cf_score = 20.0
+                cf_reason = f"Excellent momentum: Last commit was {days_ago} days ago."
+            elif days_ago < 90:
+                cf_score = 16.0
+                cf_reason = f"Healthy activity: Last commit was {days_ago} days ago."
+            elif days_ago < 180:
+                cf_score = 12.0
+                cf_reason = f"Slowing activity: Last commit was {days_ago} days ago."
+            elif days_ago < 365:
+                cf_score = 8.0
+                cf_reason = f"Stale: Last commit was {days_ago} days ago."
             else:
-                popularity = stars + forks * 2
-                res_ratio = 1.0 - (open_issues / (popularity + 5.0))
-                res_ratio = max(0.2, min(1.0, res_ratio))
-                issue_resolution_score = round(res_ratio * 100, 1)
+                cf_score = 3.0
+                cf_reason = f"Dormant: No commits in over {days_ago} days."
+                
+            surv_breakdown.append({
+                "category": "Commit Frequency",
+                "score": round(cf_score, 1),
+                "max": 20.0,
+                "reason": cf_reason
+            })
+            
+            # B. Contributor Activity (Max 20.0)
+            ca_score = 0.0
+            ca_reason = ""
+            if active_contribs >= 3:
+                ca_score = 20.0
+                ca_reason = f"Robust team: {active_contribs} active contributors in the last 90 days."
+            elif active_contribs >= 1:
+                ca_score = 16.0
+                ca_reason = f"Maintained: {active_contribs} active contributors in the last 90 days."
+            elif total_contribs >= 5:
+                ca_score = 12.0
+                ca_reason = f"Historically active: {total_contribs} total contributors, but none active recently."
+            elif total_contribs >= 2:
+                ca_score = 8.0
+                ca_reason = f"Small historical team: {total_contribs} total contributors."
+            else:
+                ca_score = 4.0
+                ca_reason = f"Single contributor project: High bus factor risk."
 
-            # F. Security risk score (out of 100)
-            sec_score = 100.0
-            num_dups = 0
+            surv_breakdown.append({
+                "category": "Contributor Activity",
+                "score": round(ca_score, 1),
+                "max": 20.0,
+                "reason": ca_reason
+            })
+            
+            # C. Repository Popularity (Max 15.0)
+            rp_score = 0.0
+            rp_reason = ""
+            popularity = stars + forks * 2
+            if popularity > 500:
+                rp_score = 15.0
+                rp_reason = f"Highly popular: {stars} stars, {forks} forks."
+            elif popularity > 100:
+                rp_score = 12.0
+                rp_reason = f"Recognized: {stars} stars, {forks} forks."
+            elif popularity > 20:
+                rp_score = 8.0
+                rp_reason = f"Growing: {stars} stars, {forks} forks."
+            elif popularity > 0:
+                rp_score = 4.0
+                rp_reason = f"Niche: {stars} stars, {forks} forks."
+            else:
+                rp_score = 0.0
+                rp_reason = "No notable community popularity."
+
+            surv_breakdown.append({
+                "category": "Repository Popularity",
+                "score": round(rp_score, 1),
+                "max": 15.0,
+                "reason": rp_reason
+            })
+
+            # D. Security Health (Max 15.0)
+            sh_score = 15.0
+            sh_reason = "Acceptable security posture."
             num_susp = 0
+            num_dups = 0
             num_unpinned = 0
             if repo.dependencies_profile:
                 report = repo.dependencies_profile.get("report", {})
-                num_dups = len(report.get("duplicates", []))
                 num_susp = len(report.get("suspicious_declarations", []))
+                num_dups = len(report.get("duplicates", []))
                 num_unpinned = len(report.get("missing_versions", []))
-            
-            sec_score -= min(30, num_susp * 15)
-            sec_score -= min(20, num_dups * 5)
-            sec_score -= min(25, num_unpinned * 3)
+                
+            sh_score -= min(6.0, num_susp * 3.0)
+            sh_score -= min(4.0, num_dups * 1.0)
+            sh_score -= min(5.0, num_unpinned * 1.0)
             
             build_failed = False
             if repo.build_result and not repo.build_result.get("build_success"):
                 build_failed = True
-                sec_score -= 20.0
+                sh_score -= 5.0
                 
-            security_risks_score = max(10.0, sec_score)
+            sh_score = max(0.0, sh_score)
+            
+            if sh_score == 15.0:
+                sh_reason = "No critical vulnerabilities or suspicious dependencies."
+            elif sh_score > 8.0:
+                sh_reason = f"Minor risks detected: {num_susp} suspicious, {num_unpinned} unpinned."
+            else:
+                sh_reason = f"High risk: {num_susp} suspicious, {num_unpinned} unpinned, {build_failed and 'build failure' or ''}."
 
-            # Weighted average for survivability score
-            srv_score = (
-                commit_freq_score * 0.25 +
-                release_freq_score * 0.15 +
-                dependency_freshness_score * 0.15 +
-                contributor_activity_score * 0.20 +
-                issue_resolution_score * 0.10 +
-                security_risks_score * 0.15
-            )
-            srv_score = round(min(100.0, max(0.0, srv_score)), 1)
+            surv_breakdown.append({
+                "category": "Security Health",
+                "score": round(sh_score, 1),
+                "max": 15.0,
+                "reason": sh_reason
+            })
+
+            # E. Dependency Freshness (Max 10.0)
+            df_score = 0.0
+            df_reason = ""
+            total_deps = 0
+            pinned_deps = 0
+            if repo.dependencies_profile:
+                deps_list = repo.dependencies_profile.get("dependencies", [])
+                total_deps = len(deps_list)
+                pinned_deps = sum(1 for d in deps_list if d.get("version") and d.get("version") not in ("*", "latest", "unspecified"))
+            
+            if total_deps > 0:
+                pin_ratio = pinned_deps / total_deps
+                df_score = pin_ratio * 10.0
+                # Apply decay based on inactivity
+                if days_ago < 90:
+                    decay = 1.0
+                elif days_ago < 180:
+                    decay = 0.8
+                elif days_ago < 365:
+                    decay = 0.6
+                else:
+                    decay = 0.4
+                df_score = df_score * decay
+                df_reason = f"{round(pin_ratio*100)}% pinned deps. Activity decay multiplier: {decay}x."
+            else:
+                df_score = 7.5
+                df_reason = "No dependencies detected to evaluate."
+
+            surv_breakdown.append({
+                "category": "Dependency Freshness",
+                "score": round(df_score, 1),
+                "max": 10.0,
+                "reason": df_reason
+            })
+
+            # F. Release Frequency (Max 10.0)
+            rf_score = 0.0
+            rf_reason = ""
+            if tags_count >= 10:
+                rf_score = 10.0
+                rf_reason = f"Frequent releases: {tags_count} tags cataloged."
+            elif tags_count >= 5:
+                rf_score = 8.5
+                rf_reason = f"Steady releases: {tags_count} tags cataloged."
+            elif tags_count >= 1:
+                rf_score = 6.0
+                rf_reason = f"Occasional releases: {tags_count} tags cataloged."
+            else:
+                rf_score = 2.5
+                rf_reason = "No formal release versions or git tags cataloged."
+
+            surv_breakdown.append({
+                "category": "Release Frequency",
+                "score": round(rf_score, 1),
+                "max": 10.0,
+                "reason": rf_reason
+            })
+
+            # G. Issue Resolution (Max 10.0)
+            ir_score = 0.0
+            ir_reason = ""
+            if open_issues == 0:
+                ir_score = 10.0
+                ir_reason = "No open issues."
+            else:
+                res_ratio = 1.0 - (open_issues / (popularity + 5.0))
+                res_ratio = max(0.2, min(1.0, res_ratio))
+                ir_score = res_ratio * 10.0
+                ir_reason = f"Ratio of {open_issues} open issues relative to repository popularity."
+
+            surv_breakdown.append({
+                "category": "Issue Resolution",
+                "score": round(ir_score, 1),
+                "max": 10.0,
+                "reason": ir_reason
+            })
+
+            srv_score = round(cf_score + ca_score + rp_score + sh_score + df_score + rf_score + ir_score, 1)
+
+            # Confidence Score Calculation
+            # Higher confidence if we have history and active data.
+            confidence_score = 0.0
+            if days_ago < 365 and total_contribs > 0:
+                confidence_score = 95.0
+            elif days_ago >= 365:
+                # Less confident predicting survivability for dormant repos based on current snapshot
+                confidence_score = 80.0
+            else:
+                confidence_score = 65.0 # Very little data
+                
+            if not repo.dependencies_profile:
+                confidence_score -= 15.0 # Less confidence without dep parsing
+            if not repo.detected_stack:
+                confidence_score -= 10.0
 
             # Determine Health Category
-            if days_ago >= 365 and commit_freq_score <= 15:
+            if days_ago >= 365 and cf_score <= 5.0:
                 health_category = "Dormant"
             elif srv_score >= 80:
                 health_category = "Healthy"
@@ -483,6 +680,29 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
             rep_score = min(100.0, max(0.0, rep_score))
             
             # Repository Health Prediction
+            # Update Survivability Factors dictionary
+            findings["survivability_factors"] = {
+                "breakdown": surv_breakdown,
+                "confidence_score": round(confidence_score, 1),
+                "total_score": srv_score,
+                "active_maintenance": days_ago < 90,
+                "license_permissive": True,
+                "dependency_health": "warnings" if (num_dups + num_susp) > 2 else "healthy"
+            }
+            
+            findings["survivability_details"] = {
+                "health_category": health_category,
+                "risk_factors": risk_factors,
+                "raw_stats": {
+                    "commit_count_1y": commit_count,
+                    "tags_count": tags_count,
+                    "total_contributors": total_contribs,
+                    "active_contributors_90d": active_contribs,
+                    "last_commit_days_ago": days_ago,
+                    "open_issues": open_issues
+                }
+            }
+            
             prediction_input_commits = {
                 "last_commit_days_ago": days_ago,
                 "commit_count_1y": commit_count
@@ -503,7 +723,7 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
             prediction = health_prediction_service.predict_health(
                 commits=prediction_input_commits,
                 contributors=prediction_input_contributors,
-                dependency_freshness=dependency_freshness_score,
+                dependency_freshness=df_score * 10.0,
                 issue_activity=prediction_input_issue,
                 releases=prediction_input_releases
             )
@@ -516,35 +736,8 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
             
             findings = {
                 "reproducibility_factors": {
-                    "has_dockerfile": has_docker,
-                    "has_readme": has_readme,
-                    "environment_instructions_score": float(readme_score / 10)
-                },
-                "survivability_factors": {
-                    "active_maintenance": days_ago < 90,
-                    "license_permissive": True,
-                    "dependency_health": "warnings" if (num_dups + num_susp) > 2 else "healthy"
-                },
-                "survivability_details": {
-                    "survivability_score": srv_score,
-                    "health_category": health_category,
-                    "risk_factors": risk_factors,
-                    "metrics": {
-                        "commit_frequency_score": commit_freq_score,
-                        "release_frequency_score": release_freq_score,
-                        "dependency_freshness_score": dependency_freshness_score,
-                        "contributor_activity_score": contributor_activity_score,
-                        "issue_resolution_score": issue_resolution_score,
-                        "security_risks_score": security_risks_score
-                    },
-                    "raw_stats": {
-                        "commit_count_1y": commit_count,
-                        "tags_count": tags_count,
-                        "total_contributors": total_contribs,
-                        "active_contributors_90d": active_contribs,
-                        "last_commit_days_ago": days_ago,
-                        "open_issues": open_issues
-                    }
+                    "breakdown": reproducibility_breakdown,
+                    "total_score": rep_score
                 },
                 "health_prediction": prediction,
                 "intelligence": {
@@ -782,6 +975,7 @@ def build_workflow() -> Any:
     workflow.add_node("repository_acquisition", repository_acquisition_node)
     workflow.add_node("technology_discovery", technology_discovery_node)
     workflow.add_node("dependency_analysis", dependency_analysis_node)
+    workflow.add_node("vulnerability_analysis", vulnerability_analysis_node)
     workflow.add_node("environment_reconstruction", environment_reconstruction_node)
     workflow.add_node("documentation_analysis", documentation_analysis_node)
     workflow.add_node("ai_documentation", ai_documentation_node)
@@ -797,7 +991,8 @@ def build_workflow() -> Any:
     # Link Nodes Sequentially
     workflow.add_edge("repository_acquisition", "technology_discovery")
     workflow.add_edge("technology_discovery", "dependency_analysis")
-    workflow.add_edge("dependency_analysis", "environment_reconstruction")
+    workflow.add_edge("dependency_analysis", "vulnerability_analysis")
+    workflow.add_edge("vulnerability_analysis", "environment_reconstruction")
     workflow.add_edge("environment_reconstruction", "documentation_analysis")
     workflow.add_edge("documentation_analysis", "ai_documentation")
     workflow.add_edge("ai_documentation", "ai_dependency")
