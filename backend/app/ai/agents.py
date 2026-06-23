@@ -461,7 +461,21 @@ Generate a JSON object with EXACTLY the following keys. Do not include any other
         commands = []
         confidence = 0.5
 
-        if category == "Missing Dependency":
+        if category == "Codebase Optimization":
+            steps = [
+                "Implement automated CI/CD pipelines to ensure consistent validation of code on every commit.",
+                "Enforce strict dependency pinning using lock files to guarantee environmental reproducibility.",
+                "Set up local vulnerability scanners (like pip-audit or npm audit) into pre-commit hooks."
+            ]
+            commands = ["pip-audit", "npm audit"]
+            confidence = 0.8
+            return {
+                "root_cause_explanation": "The codebase is healthy and compiled successfully. These are proactive optimizations for longevity.",
+                "fix_steps": steps,
+                "commands_to_execute": commands,
+                "confidence_level": confidence
+            }
+        elif category == "Missing Dependency":
             steps = [
                 f"Verify if the dependency referenced in '{root_cause}' is correctly declared in the manifest file.",
                 "Ensure that the package registry is accessible from the container or host."

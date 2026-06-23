@@ -466,11 +466,25 @@ class ReportService:
         story.append(b_table)
         
         diagnosis = repo.failure_diagnosis if isinstance(repo.failure_diagnosis, dict) else {}
-        if not b_succ and diagnosis:
-            story.append(Spacer(1, 10))
-            story.append(Paragraph("Failure Diagnosis", styles['subsection']))
-            story.append(Paragraph(f"<b>Error Classification:</b> {diagnosis.get('error_classification') or 'Unknown'}", styles['body']))
-            story.append(Paragraph(f"<b>Root Cause:</b> {diagnosis.get('root_cause') or 'Unknown'}", styles['body']))
+        ai_rec = diagnosis.get("ai_recommendation", {}) if diagnosis else {}
+        
+        if diagnosis:
+            if not b_succ:
+                story.append(Spacer(1, 10))
+                story.append(Paragraph("Failure Diagnosis", styles['subsection']))
+                story.append(Paragraph(f"<b>Error Classification:</b> {diagnosis.get('category') or diagnosis.get('error_classification') or 'Unknown'}", styles['body']))
+                story.append(Paragraph(f"<b>Root Cause:</b> {diagnosis.get('root_cause') or 'Unknown'}", styles['body']))
+            
+            if ai_rec:
+                story.append(Spacer(1, 10))
+                story.append(Paragraph("AI Fix Recommendation & Optimization", styles['subsection']))
+                if ai_rec.get("root_cause_explanation"):
+                    story.append(Paragraph(f"<b>AI Analysis:</b> {ai_rec.get('root_cause_explanation')}", styles['body']))
+                if ai_rec.get("fix_steps"):
+                    story.append(Spacer(1, 5))
+                    story.append(Paragraph("<b>Actionable Steps:</b>", styles['body_bold']))
+                    for step in ai_rec.get("fix_steps", []):
+                        story.append(Paragraph(f"• {step}", styles['body']))
 
         story.append(PageBreak())
 

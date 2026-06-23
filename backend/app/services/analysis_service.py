@@ -59,7 +59,19 @@ class AnalysisService:
             }
 
             # 4. Invoke Workflow Asynchronously
-            final_state = await workflow.ainvoke(initial_state)
+            final_state = initial_state.copy()
+            async for output in workflow.astream(initial_state):
+                for node_name, state_update in output.items():
+                    final_state.update(state_update)
+                    
+                    # Push real-time log updates to the frontend
+                    if "logs" in state_update:
+                        async with AsyncSessionLocal() as update_db:
+                            analysis_record = await analysis_repo.get(update_db, analysis_id)
+                            if analysis_record:
+                                await analysis_repo.update(update_db, db_obj=analysis_record, obj_in={
+                                    "logs": state_update["logs"]
+                                })
 
             # Check if workflow nodes completed successfully
             success = final_state.get("status") == "cloned"

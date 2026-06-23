@@ -35,20 +35,29 @@ export default function RiskForecastPanel({ repo }) {
   const activityScore = Math.max(0, 100 - Math.min(daysAgo / 3.65, 100))
   const maintenanceRisk = getRiskLevel(activityScore)
 
-  // Dependency risk from metrics.dependency_freshness_score (lower = higher risk)
-  const depFreshnessScore = metrics.dependency_freshness_score || 50
+  // Helper to extract score percentage from the dynamic survivability factors breakdown
+  const getSurvScorePct = (categoryName) => {
+    const factors = findings.survivability_factors || {}
+    const breakdown = factors.breakdown || []
+    const item = breakdown.find(b => b.category === categoryName)
+    if (!item || !item.max) return 50 // Default fallback
+    return Math.max(0, Math.min(100, (item.score / item.max) * 100))
+  }
+
+  // Dependency risk from Dependency Freshness (lower = higher risk)
+  const depFreshnessScore = getSurvScorePct('Dependency Freshness')
   const depRisk = getRiskLevel(depFreshnessScore)
 
-  // Security risk from metrics.security_risks_score
-  const secScore = metrics.security_risks_score ?? 100
+  // Security risk from Security Health
+  const secScore = getSurvScorePct('Security Health')
   const secRisk  = getRiskLevel(secScore)
 
   // Documentation risk
   const docScore = repo.documentation_profile?.completeness_score || 50
   const docRisk  = getRiskLevel(docScore)
 
-  // Community risk from contributor_activity_score
-  const commScore = metrics.contributor_activity_score || 50
+  // Community risk from Contributor Activity
+  const commScore = getSurvScorePct('Contributor Activity')
   const commRisk  = getRiskLevel(commScore)
 
   const dimensions = [

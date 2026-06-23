@@ -26,6 +26,15 @@ export default function VisualizationsPanel({ repo }) {
     )
   }
 
+  // Helper to extract score percentage (0-100) from the dynamic survivability factors breakdown
+  const getSurvScorePct = (categoryName) => {
+    const factors = findings.survivability_factors || {}
+    const breakdown = factors.breakdown || []
+    const item = breakdown.find(b => b.category === categoryName)
+    if (!item || !item.max) return 0
+    return Math.max(0, Math.min(100, (item.score / item.max) * 100))
+  }
+
   // === SVG Gauge Component ===
   const Gauge = ({ score, label, color }) => {
     const r = 52
@@ -84,11 +93,11 @@ export default function VisualizationsPanel({ repo }) {
   // === Radar Chart (Pentagon) ===
   const RadarChart = () => {
     const axes = [
-      { label: 'Maintenance', value: (metrics.commit_frequency_score || 0) / 100 },
-      { label: 'Community',   value: (metrics.contributor_activity_score || 0) / 100 },
-      { label: 'Security',    value: (metrics.security_risks_score || 0) / 100 },
-      { label: 'Dependency',  value: (metrics.dependency_freshness_score || 0) / 100 },
-      { label: 'Release',     value: (metrics.release_frequency_score || 0) / 100 },
+      { label: 'Maintenance', value: getSurvScorePct('Commit Frequency') / 100 },
+      { label: 'Community',   value: getSurvScorePct('Contributor Activity') / 100 },
+      { label: 'Security',    value: getSurvScorePct('Security Health') / 100 },
+      { label: 'Dependency',  value: getSurvScorePct('Dependency Freshness') / 100 },
+      { label: 'Release',     value: getSurvScorePct('Release Frequency') / 100 },
     ]
 
     const cx = 100, cy = 100, maxR = 75
@@ -236,12 +245,12 @@ export default function VisualizationsPanel({ repo }) {
   // === 6-Dimension Horizontal Bar Chart ===
   const SurvivabilityBars = () => {
     const bars = [
-      { name: 'Commit Frequency',    score: metrics.commit_frequency_score    || 0, color: '#6366f1' },
-      { name: 'Contributor Activity',score: metrics.contributor_activity_score || 0, color: '#a855f7' },
-      { name: 'Release Frequency',   score: metrics.release_frequency_score   || 0, color: '#22d3ee' },
-      { name: 'Dep Freshness',       score: metrics.dependency_freshness_score || 0, color: '#10b981' },
-      { name: 'Security Index',      score: metrics.security_risks_score      || 0, color: '#f59e0b' },
-      { name: 'Issue Resolution',    score: metrics.issue_resolution_score    || 0, color: '#ec4899' },
+      { name: 'Commit Frequency',    score: getSurvScorePct('Commit Frequency'),    color: '#6366f1' },
+      { name: 'Contributor Activity',score: getSurvScorePct('Contributor Activity'),color: '#a855f7' },
+      { name: 'Release Frequency',   score: getSurvScorePct('Release Frequency'),   color: '#22d3ee' },
+      { name: 'Dep Freshness',       score: getSurvScorePct('Dependency Freshness'),color: '#10b981' },
+      { name: 'Security Health',     score: getSurvScorePct('Security Health'),     color: '#f59e0b' },
+      { name: 'Issue Resolution',    score: getSurvScorePct('Issue Resolution'),    color: '#ec4899' },
     ]
 
     return (

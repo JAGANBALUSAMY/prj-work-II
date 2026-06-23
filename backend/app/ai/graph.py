@@ -373,6 +373,7 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
             # 4. Documentation Quality (Max 15)
             docs_score = 0.0
             docs_reason = "No documentation found."
+            completeness = 0
             if repo.documentation_profile and repo.documentation_profile.get("scanned_file"):
                 completeness = repo.documentation_profile.get("completeness_score", 0)
                 docs_score = 15.0 * (completeness / 100.0)
@@ -681,7 +682,7 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
             
             # Repository Health Prediction
             # Update Survivability Factors dictionary
-            findings["survivability_factors"] = {
+            survivability_factors = {
                 "breakdown": surv_breakdown,
                 "confidence_score": round(confidence_score, 1),
                 "total_score": srv_score,
@@ -690,7 +691,7 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
                 "dependency_health": "warnings" if (num_dups + num_susp) > 2 else "healthy"
             }
             
-            findings["survivability_details"] = {
+            survivability_details = {
                 "health_category": health_category,
                 "risk_factors": risk_factors,
                 "raw_stats": {
@@ -731,7 +732,7 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
             summary = (
                 f"Successfully parsed repository {repo.owner}/{repo.name}. "
                 f"Technology stack uses: {', '.join(repo.detected_stack.get('backend', [])) if repo.detected_stack else 'None'}. "
-                f"Onboarding score is {int(readme_score)}% and environment scan listed {len(repo.environment_profile.get('variables', [])) if repo.environment_profile else 0} variables."
+                f"Onboarding score is {int(completeness)}% and environment scan listed {len(repo.environment_profile.get('variables', [])) if repo.environment_profile else 0} variables."
             )
             
             findings = {
@@ -739,6 +740,8 @@ async def store_results_node(state: AnalysisState) -> Dict[str, Any]:
                     "breakdown": reproducibility_breakdown,
                     "total_score": rep_score
                 },
+                "survivability_factors": survivability_factors,
+                "survivability_details": survivability_details,
                 "health_prediction": prediction,
                 "intelligence": {
                     "architecture": intelligence_service.evaluate_architecture(repo),
@@ -889,6 +892,14 @@ async def build_validation_node(state: AnalysisState) -> Dict[str, Any]:
     Node 10: Runs the build validation service inside the container/host.
     """
     logs = state.get("logs", [])
+    if state.get("status") != "cloned":
+        logs.append("Node [build_validation]: Skipped (Repository not cloned).")
+        return {
+            "logs": logs,
+            "build_result": {"build_success": False, "logs": "Repository acquisition failed.", "build_attempted": False},
+            "failure_diagnosis": {"category": "Acquisition Failure", "root_cause": "Repository not cloned.", "recommendations": []}
+        }
+        
     logs.append("Node [build_validation]: Running build validation...")
     repo_id = UUID(state["repository_id"])
     
@@ -922,10 +933,6 @@ async def ai_recommendation_node(state: AnalysisState) -> Dict[str, Any]:
     logs = state.get("logs", [])
     build_res = state.get("build_result") or {}
     
-    if build_res.get("build_success") is True:
-        logs.append("Node [ai_recommendation]: Skipped (Build succeeded).")
-        return {"logs": logs, "ai_recommendation": {}}
-        
     logs.append("Node [ai_recommendation]: Running AI Recommendation Agent...")
     repo_id = UUID(state["repository_id"])
     
@@ -938,10 +945,19 @@ async def ai_recommendation_node(state: AnalysisState) -> Dict[str, Any]:
                 
             diagnosis = repo.failure_diagnosis or {}
             
-            # Fetch similar failures
+            # If build succeeded, shift diagnosis context to Codebase Optimization
+            if build_res.get("build_success") is True:
+                logs.append("Node [ai_recommendation]: Build succeeded. Generating codebase optimization recommendation instead of failure diagnosis.")
+                diagnosis = {
+                    "category": "Codebase Optimization",
+                    "root_cause": "Build succeeded perfectly. No critical errors detected.",
+                    "recommendations": []
+                }
+            
+            # Fetch similar failures if any
             query_logs = build_res.get("logs") or ""
             similar_failures = []
-            if query_logs.strip():
+            if query_logs.strip() and not build_res.get("build_success"):
                 # Fetch up to 4 similar failures (filter out itself later)
                 raw_similar = failure_rag_service.retrieve_similar_failures(query_logs, limit=4)
                 similar_failures = [sf for sf in raw_similar if sf["repository_id"] != str(repo_id)][:3]

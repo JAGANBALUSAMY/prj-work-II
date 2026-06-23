@@ -72,14 +72,18 @@ export default function ActionPlanPanel({ repo }) {
   missingDocAreas.forEach(area => optional.push({ text: `Add missing documentation section: ${area}`, source: 'Documentation Scanner', icon: Lightbulb }))
 
   // Low survivability submetrics as important
-  const metrics = details.metrics || {}
-  if ((metrics.commit_frequency_score || 0) < 30) {
+  const getScore = (name) => {
+    const item = findings.survivability_factors?.breakdown?.find(b => b.category === name)
+    return item ? (item.score / item.max) * 100 : 100 // Default to 100 to hide warning if not found
+  }
+
+  if (getScore('Commit Frequency') < 50) {
     important.push({ text: 'Increase commit frequency — the project shows very low maintenance activity. Consider a structured release schedule.', source: 'Survivability Analysis', icon: AlertTriangle })
   }
-  if ((metrics.contributor_activity_score || 0) < 30) {
+  if (getScore('Contributor Activity') < 50) {
     important.push({ text: 'Attract new contributors — single developer dependency is a critical survivability risk. Add a CONTRIBUTING.md guide.', source: 'Survivability Analysis', icon: AlertTriangle })
   }
-  if ((metrics.release_frequency_score || 0) < 30) {
+  if (getScore('Release Frequency') < 50) {
     optional.push({ text: 'Establish a release tagging workflow (semantic versioning) to improve project maturity signals and dependency management for downstream consumers.', source: 'Survivability Analysis', icon: Lightbulb })
   }
 

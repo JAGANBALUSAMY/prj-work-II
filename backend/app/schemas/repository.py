@@ -27,6 +27,7 @@ class RepositoryUpdate(BaseModel):
     documentation_profile: Optional[dict] = None
     build_result: Optional[dict] = None
     failure_diagnosis: Optional[dict] = None
+    vulnerability_profile: Optional[dict] = None
 
 class BuildValidationResult(BaseModel):
     build_attempted: bool
@@ -77,6 +78,7 @@ class RepositoryInDBBase(RepositoryBase):
     documentation_profile: Optional[dict] = None
     build_result: Optional[dict] = None
     failure_diagnosis: Optional[dict] = None
+    vulnerability_profile: Optional[dict] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

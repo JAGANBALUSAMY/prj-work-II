@@ -161,12 +161,12 @@ export default function AnalysisPanel({
                     </div>
 
                     {/* Execution Terminal Console */}
-                    <div className="lg:col-span-2 space-y-4 flex flex-col justify-between">
-                      <h4 className="text-[11px] font-bold text-text-secondary uppercase tracking-widest flex items-center gap-1.5">
+                    <div className="lg:col-span-2 flex flex-col gap-4">
+                      <h4 className="text-[11px] font-bold text-text-secondary uppercase tracking-widest flex items-center gap-1.5 shrink-0">
                         <Terminal className="w-4 h-4 text-brand-indigo" /> 
                         Diagnostic logs stream
                       </h4>
-                      <div className="p-4 rounded-xl bg-bg-input border border-border-subtle font-mono text-[10px] text-text-secondary space-y-2 max-h-[260px] overflow-y-auto flex-1 shadow-inner leading-relaxed select-all">
+                      <div className="p-4 rounded-xl bg-bg-input border border-border-subtle font-mono text-[10px] text-text-secondary space-y-2 overflow-y-auto flex-1 min-h-0 shadow-inner leading-relaxed select-all">
                         {logs.length === 0 ? (
                           <div className="text-text-muted italic py-16 text-center">Awaiting execution logs stream...</div>
                         ) : (

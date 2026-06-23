@@ -31,6 +31,14 @@ export default function BuildWorkflow({ repo }) {
   if (buildResult) {
     if (buildResult.build_success) {
       buildState = 'completed'
+      // If backend now provides optimization recommendations even on success:
+      if (diagnosis && diagnosis.ai_recommendation) {
+        diagnoseState = 'completed'
+        recommendState = 'completed'
+      } else {
+        diagnoseState = 'skipped'
+        recommendState = 'skipped'
+      }
     } else {
       buildState = 'failed'
       if (diagnosis) {
@@ -62,6 +70,9 @@ export default function BuildWorkflow({ repo }) {
     }
     if (state === 'failed') {
       return 'bg-status-error-bg border-status-error text-status-error animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.2)]'
+    }
+    if (state === 'skipped') {
+      return 'bg-bg-panel border-border-subtle text-text-muted opacity-40'
     }
     return 'bg-bg-panel border-border-subtle text-text-muted'
   }
@@ -99,6 +110,8 @@ export default function BuildWorkflow({ repo }) {
                   <Check className="w-5 h-5 text-status-success font-black" />
                 ) : stage.state === 'failed' && stage.id === 'build' ? (
                   <XCircle className="w-5 h-5 text-status-error" />
+                ) : stage.state === 'skipped' ? (
+                  <StageIcon className="w-4.5 h-4.5 opacity-50" />
                 ) : (
                   <StageIcon className="w-4.5 h-4.5" />
                 )}
@@ -106,10 +119,10 @@ export default function BuildWorkflow({ repo }) {
 
               {/* Title & Desc */}
               <div>
-                <span className={`block text-[11px] font-bold ${stage.state === 'failed' ? 'text-status-error font-extrabold' : stage.state === 'completed' ? 'text-status-success' : 'text-text-primary'}`}>
-                  {stage.label}
+                <span className={`block text-[11px] font-bold ${stage.state === 'failed' ? 'text-status-error font-extrabold' : stage.state === 'completed' ? 'text-status-success' : stage.state === 'skipped' ? 'text-text-muted opacity-60' : 'text-text-primary'}`}>
+                  {stage.state === 'skipped' ? `${stage.label} (Skipped)` : stage.label}
                 </span>
-                <span className="block text-[8px] text-text-muted font-light max-w-[90px] mx-auto mt-0.5 leading-tight">
+                <span className={`block text-[8px] text-text-muted font-light max-w-[90px] mx-auto mt-0.5 leading-tight ${stage.state === 'skipped' ? 'opacity-60' : ''}`}>
                   {stage.desc}
                 </span>
               </div>

@@ -83,7 +83,15 @@ export default function ExecutiveIntelligencePanel({ repo }) {
   }
 
   // --- Reproducibility score breakdown ---
-  const reproBreakdown = [
+  const dynamicReproBreakdown = repFactors.breakdown?.map(item => ({
+    label: item.category,
+    points: item.score,
+    max: item.max,
+    achieved: item.score > 0,
+    reason: item.reason
+  }))
+
+  const reproBreakdown = dynamicReproBreakdown || [
     { label: 'Base score',              points: 30, max: 30, achieved: true,                    reason: 'Awarded for any analyzed repository' },
     { label: 'Dockerfile / Container',  points: 30, max: 30, achieved: !!repFactors.has_dockerfile, reason: 'Dockerfile or docker-compose.yml found' },
     { label: 'README file present',     points: 10, max: 10, achieved: !!repFactors.has_readme,  reason: 'README.md or README.rst found' },
@@ -95,7 +103,15 @@ export default function ExecutiveIntelligencePanel({ repo }) {
   ]
 
   // --- Survivability score breakdown ---
-  const survBreakdown = [
+  const dynamicSurvBreakdown = findings.survivability_factors?.breakdown?.map(item => ({
+    label: item.category,
+    points: item.score,
+    max: item.max,
+    achieved: item.score > 0,
+    reason: item.reason
+  }))
+
+  const survBreakdown = dynamicSurvBreakdown || [
     { label: 'Commit Frequency (25%)',    points: Math.round((metrics.commit_frequency_score || 0) * 0.25),    max: 25, achieved: (metrics.commit_frequency_score || 0) > 0 },
     { label: 'Contributor Activity (20%)',points: Math.round((metrics.contributor_activity_score || 0) * 0.20), max: 20, achieved: (metrics.contributor_activity_score || 0) > 0 },
     { label: 'Release Frequency (15%)',   points: Math.round((metrics.release_frequency_score || 0) * 0.15),   max: 15, achieved: (metrics.release_frequency_score || 0) > 0 },
